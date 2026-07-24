@@ -10,7 +10,7 @@
 
 const { spawn } = require("child_process");
 const electron = require("electron");
-const { buildElectronLaunchConfig } = require("./hooks/shared-process");
+const { buildElectronLaunchConfig } = require("./src/electron-launch-config");
 
 const forwardedArgs = process.argv.slice(2);
 const launchConfig = buildElectronLaunchConfig(__dirname, { forwardedArgs });
