@@ -70,15 +70,11 @@ core.ops.installRenderHooks({
 });
 
 globalThis.ClawdSettingsTabGeneral.init(core);
-globalThis.ClawdSettingsTabAgents.init(core);
 globalThis.ClawdSettingsTabTheme.init(core);
 globalThis.ClawdSettingsTabAnimMap.init(core);
 globalThis.ClawdSettingsTabAnimOverrides.init(core);
 globalThis.ClawdSettingsTabShortcuts.init(core);
-if (globalThis.ClawdSettingsTabTelegramApproval) globalThis.ClawdSettingsTabTelegramApproval.init(core);
 globalThis.ClawdSettingsTabAbout.init(core);
-if (globalThis.ClawdSettingsTabRemoteSsh) globalThis.ClawdSettingsTabRemoteSsh.init(core);
-if (globalThis.ClawdSettingsTabMobile) globalThis.ClawdSettingsTabMobile.init(core);
 if (globalThis.ClawdSettingsTabMinicpm) globalThis.ClawdSettingsTabMinicpm.init(core);
 
 if (window.settingsAPI && typeof window.settingsAPI.onChanged === "function") {
@@ -111,11 +107,7 @@ if (window.settingsAPI && typeof window.settingsAPI.getSnapshot === "function") 
   });
 }
 
-if (window.settingsAPI && typeof window.settingsAPI.listAgents === "function") {
-  window.settingsAPI.listAgents().then((list) => {
-    core.ops.applyAgentMetadata(list);
-  }).catch((err) => {
-    console.warn("settings: listAgents failed", err);
-    core.ops.applyAgentMetadata([]);
-  });
-}
+// The agents settings tab (and its main-process IPC handler) is gone —
+// runtime.agentMetadata just stays empty, which is what this always
+// resolved to anyway once "settings:list-agents" had no handler left.
+core.ops.applyAgentMetadata([]);
