@@ -1,0 +1,183 @@
+const assert = require("node:assert");
+const { describe, it } = require("node:test");
+const fs = require("node:fs");
+const path = require("node:path");
+const { minimatch } = require("minimatch");
+
+const pkg = require("../package.json");
+const ROOT = path.join(__dirname, "..");
+
+function matchedByAnyGlob(globs, target) {
+  return globs.some((g) => minimatch(target, g));
+}
+
+describe("package build config", () => {
+  it("ships project window icons in packaged builds", () => {
+    assert.ok(
+      pkg.build.files.includes("assets/icons/**/*"),
+      "build.files should include assets/icons/**/*"
+    );
+  });
+
+  it("ships third-party notices in packaged builds", () => {
+    assert.ok(
+      pkg.build.files.includes("NOTICE.md"),
+      "build.files should include NOTICE.md"
+    );
+  });
+
+  it("unpacks built-in theme assets so the folder can be opened from settings", () => {
+    assert.ok(
+      pkg.build.asarUnpack.includes("assets/svg/**/*"),
+      "asarUnpack should include assets/svg/**/*"
+    );
+    assert.ok(
+      pkg.build.asarUnpack.includes("themes/**/*"),
+      "asarUnpack should include themes/**/*"
+    );
+  });
+
+  describe("Windows architecture targets", () => {
+    function getWindowsNsisTarget() {
+      const targets = pkg.build.win && pkg.build.win.target;
+      return Array.isArray(targets) ? targets.find((target) => target && target.target === "nsis") : null;
+    }
+
+    it("builds native Windows installers for x64 and arm64", () => {
+      const target = getWindowsNsisTarget();
+      assert.ok(target, "build.win.target should include an nsis target");
+      assert.deepStrictEqual(
+        target.arch.slice().sort(),
+        ["x64", "arm64"].slice().sort(),
+        "Windows NSIS builds should publish both x64 and ARM64 installers"
+      );
+    });
+
+    it("uses architecture-specific Windows installer names", () => {
+      const artifactName = pkg.build.win && pkg.build.win.artifactName;
+      assert.strictEqual(
+        typeof artifactName,
+        "string",
+        "build.win.artifactName should be a string"
+      );
+      assert.match(
+        artifactName,
+        /\$\{arch\}/,
+        "Windows artifactName must include ${arch} so x64 and ARM64 installers cannot collide"
+      );
+    });
+
+    it("exposes explicit Windows architecture build scripts", () => {
+      assert.strictEqual(pkg.scripts["build:win:x64"], "electron-builder --win nsis:x64");
+      assert.strictEqual(pkg.scripts["build:win:arm64"], "electron-builder --win nsis:arm64");
+      assert.strictEqual(pkg.scripts["build:win:all"], "electron-builder --win nsis:x64 nsis:arm64");
+    });
+
+    it("does not emit a redundant universal Windows installer", () => {
+      assert.strictEqual(
+        pkg.build.nsis && pkg.build.nsis.buildUniversalInstaller,
+        false,
+        "Windows releases should publish explicit x64/ARM64 installers, not an extra universal NSIS installer"
+      );
+    });
+  });
+
+  describe("macOS architecture targets", () => {
+    function getMacDmgTarget() {
+      const targets = pkg.build.mac && pkg.build.mac.target;
+      return Array.isArray(targets) ? targets.find((target) => target && target.target === "dmg") : null;
+    }
+
+    it("builds native macOS DMGs for x64 and arm64", () => {
+      const target = getMacDmgTarget();
+      assert.ok(target, "build.mac.target should include a dmg target");
+      assert.deepStrictEqual(
+        target.arch.slice().sort(),
+        ["x64", "arm64"].slice().sort(),
+        "macOS builds should publish both x64 and ARM64 DMGs"
+      );
+    });
+
+    it("uses architecture-specific macOS DMG names without spaces", () => {
+      const artifactName = pkg.build.mac && pkg.build.mac.artifactName;
+      assert.strictEqual(
+        typeof artifactName,
+        "string",
+        "build.mac.artifactName should be a string"
+      );
+      assert.match(
+        artifactName,
+        /\$\{arch\}/,
+        "macOS artifactName must include ${arch} so x64 and ARM64 DMGs cannot collide"
+      );
+      assert.doesNotMatch(
+        artifactName,
+        /\s/,
+        "macOS artifactName should not contain spaces so latest-mac.yml URLs match uploaded DMG assets"
+      );
+    });
+  });
+
+  describe("Linux artifact targets", () => {
+    it("uses Linux artifact names without spaces so latest-linux.yml URLs match uploaded assets", () => {
+      const artifactName = pkg.build.linux && pkg.build.linux.artifactName;
+      assert.strictEqual(
+        typeof artifactName,
+        "string",
+        "build.linux.artifactName should be a string"
+      );
+      assert.match(
+        artifactName,
+        /\$\{arch\}/,
+        "Linux artifactName should include ${arch} so architecture-specific assets stay explicit"
+      );
+      assert.doesNotMatch(
+        artifactName,
+        /\s/,
+        "Linux artifactName should not contain spaces so latest-linux.yml URLs match uploaded assets"
+      );
+    });
+  });
+
+  // getWindowsShellIconPath has a three-step fallback:
+  //   1. resourcesPath/icon.ico            ← extraResources copy
+  //   2. resourcesPath/app.asar.unpacked/assets/icon.ico
+  //   3. resourcesPath/app.asar/assets/icon.ico
+  // Fallback 1 only works if extraResources actually copies icon.ico, and
+  // fallback 3 only works if icon.ico is inside build.files. Guard both so a
+  // future refactor to either array can't silently drop the shell icon.
+  describe("Windows shell icon fallback chain", () => {
+    it("has the source icon.ico on disk", () => {
+      const src = path.join(ROOT, "assets", "icon.ico");
+      assert.ok(fs.existsSync(src), "assets/icon.ico must exist for build.win.icon + extraResources");
+    });
+
+    it("copies icon.ico into resourcesPath via extraResources", () => {
+      const extra = pkg.build.extraResources || [];
+      const copied = extra.some(
+        (e) => e && e.from === "assets/icon.ico" && e.to === "icon.ico"
+      );
+      assert.ok(copied, "build.extraResources must copy assets/icon.ico → icon.ico (shell fallback 1)");
+    });
+
+    it("wires win.icon to the same source file", () => {
+      assert.strictEqual(
+        pkg.build.win && pkg.build.win.icon,
+        "assets/icon.ico",
+        "build.win.icon should point at the same file the shell icon chain expects"
+      );
+    });
+
+    it("packs icon.ico into the asar so fallback 3 resolves", () => {
+      // getWindowsShellIconPath's third fallback reads
+      // resourcesPath/app.asar/assets/icon.ico — which only exists if the
+      // file survives the build.files glob filter. Earlier versions listed
+      // only assets/icons/**/* (subdir), which does NOT match assets/icon.ico
+      // at the root, so fallback 3 was dead. Guard against that regression.
+      assert.ok(
+        matchedByAnyGlob(pkg.build.files, "assets/icon.ico"),
+        "build.files must include a glob covering assets/icon.ico (fallback 3)"
+      );
+    });
+  });
+});

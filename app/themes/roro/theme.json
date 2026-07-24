@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "name": "Roro",
+  "version": "1.0.0",
+  "author": "Mr. Hasan",
+  "description": "A themed desktop pet based on my own pet Roro's photos.",
+  "viewBox": { "x": 0, "y": 0, "width": 40, "height": 45 },
+  "eyeTracking": {
+    "enabled": false,
+    "states": []
+  },
+  "sleepSequence": {
+    "mode": "direct"
+  },
+  "miniMode": {
+    "supported": true,
+    "states": {
+      "mini-idle": ["mini-idle.png"],
+      "mini-enter": ["mini-enter.png"],
+      "mini-peek": ["mini-peek.png"],
+      "mini-alert": ["mini-alert.png"],
+      "mini-happy": ["mini-happy.png"],
+      "mini-sleep": ["mini-sleep.png"],
+      "mini-crabwalk": ["mini-crabwalk.png"],
+      "mini-enter-sleep": ["mini-enter-sleep.png"]
+    }
+  },
+  "objectScale": {
+    "widthRatio": 1.0,
+    "heightRatio": 1.0,
+    "offsetX": 0,
+    "offsetY": 0
+  },
+  "hitBoxes": {
+    "default": { "x": 6, "y": 9, "w": 27, "h": 30 }
+  },
+  "states": {
+    "idle": ["idle.png"],
+    "thinking": ["thinking.png"],
+    "working": ["working.png"],
+    "attention": ["attention.png"],
+    "notification": ["notification.png"],
+    "error": { "fallbackTo": "notification" },
+    "sleeping": ["sleeping.png"]
+  }
+}

@@ -1,0 +1,20 @@
+# Node / Electron
+app/node_modules/
+app/dist/
+app/out/
+app/*.log
+
+# Python / sidecar
+sidecar/.venv/
+sidecar/__pycache__/
+sidecar/**/__pycache__/
+sidecar/.pytest_cache/
+sidecar/bin/
+*.pyc
+
+# Local models / adapters (large binaries)
+models
+*.gguf
+
+# OS
+.DS_Store

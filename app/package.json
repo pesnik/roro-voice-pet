@@ -1,0 +1,175 @@
+{
+  "name": "roro-voice-pet",
+  "version": "0.1.0",
+  "description": "RoRo Voice Pet — a local-first desktop pet with live voice conversation (Pipecat) and a pluggable LLM backend (local llama.cpp, OpenRouter, Hermes Agent, or any OpenAI-compatible endpoint). Pet shell + theme/settings framework bootstrapped from clawd-on-desk (AGPL-3.0-only), agent-hook integrations removed.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node launch.js",
+    "build": "electron-builder --win",
+    "build:win:x64": "electron-builder --win nsis:x64",
+    "build:win:arm64": "electron-builder --win nsis:arm64",
+    "build:win:all": "electron-builder --win nsis:x64 nsis:arm64",
+    "build:mac": "electron-builder --mac",
+    "build:mac:mvp": "bash ../sidecar/scripts/build-all.sh && electron-builder --mac --arm64 -c.mac.target=dmg",
+    "build:mac:repack": "electron-builder --mac --arm64 -c.mac.target=dmg",
+    "build:mac:notarize": "bash scripts/build-dmg-notarize.sh",
+    "build:mac:mvp:notarize": "bash ../sidecar/scripts/build-all.sh && bash scripts/build-dmg-notarize.sh",
+    "build:linux": "electron-builder --linux",
+    "build:all": "electron-builder --win --mac --linux",
+    "fetch:adapters": "node scripts/fetch-adapters.js",
+    "verify:adapters": "node scripts/verify-adapters.js",
+    "prebuild": "node scripts/fetch-adapters.js && node scripts/verify-adapters.js",
+    "prebuild:win:x64": "node scripts/fetch-adapters.js && node scripts/verify-adapters.js",
+    "prebuild:win:arm64": "node scripts/fetch-adapters.js && node scripts/verify-adapters.js",
+    "prebuild:win:all": "node scripts/fetch-adapters.js && node scripts/verify-adapters.js",
+    "prebuild:mac": "node scripts/fetch-adapters.js && node scripts/verify-adapters.js",
+    "prebuild:linux": "node scripts/fetch-adapters.js && node scripts/verify-adapters.js",
+    "prebuild:all": "node scripts/fetch-adapters.js && node scripts/verify-adapters.js",
+    "test": "node test/run-tests.js",
+    "create-theme": "node scripts/create-theme.js"
+  },
+  "keywords": [
+    "desktop-pet",
+    "electron",
+    "voice",
+    "pipecat",
+    "local-llm"
+  ],
+  "author": "pesnik",
+  "license": "AGPL-3.0-only",
+  "type": "commonjs",
+  "build": {
+    "appId": "com.pesnik.roro-voice-pet",
+    "productName": "RoRo Voice Pet",
+    "copyright": "Copyright © 2026 OpenBMB. Based on clawd-on-desk by rullerzhou-afk (AGPL-3.0-only).",
+    "mac": {
+      "icon": "assets/icon.icns",
+      "artifactName": "MiniCPM-Desk-Pet-${version}-${arch}.${ext}",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.entertainment",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "win": {
+      "icon": "assets/icon.ico",
+      "artifactName": "MiniCPM-Desk-Pet-Setup-${version}-${arch}.${ext}",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "maintainer": "OpenBMB <contact@openbmb.cn>",
+      "icon": "assets/icons",
+      "category": "Utility",
+      "artifactName": "MiniCPM-Desk-Pet-${version}-${arch}.${ext}",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "buildUniversalInstaller": false,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
+      "include": "build/installer.nsh"
+    },
+    "afterSign": "scripts/notarize.js",
+    "files": [
+      "NOTICE.md",
+      "src/**/*",
+      "assets/icon.ico",
+      "assets/icons/**/*",
+      "assets/svg/**/*",
+      "assets/sounds/**/*",
+      "assets/dock-icon.png",
+      "assets/tray-icon*.png",
+      "themes/**/*"
+    ],
+    "asarUnpack": [
+      "assets/svg/**/*",
+      "themes/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "assets/icon.ico",
+        "to": "icon.ico"
+      },
+      {
+        "from": "../sidecar/bin/${os}-${arch}",
+        "to": "sidecar-bin"
+      },
+      {
+        "from": "../sidecar",
+        "to": "sidecar",
+        "filter": [
+          "gateway/**/*.py",
+          "pyproject.toml",
+          ".python-version",
+          "README.md"
+        ]
+      },
+      {
+        "from": "../adapters",
+        "to": "adapters",
+        "filter": [
+          "**/*.gguf",
+          "**/README.md",
+          "**/USAGE.md",
+          "**/adapter_config.json"
+        ]
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "OpenBMB",
+        "repo": "MiniCPM-Desk-Pet"
+      }
+    ]
+  },
+  "devDependencies": {
+    "@electron/notarize": "^3.1.1",
+    "electron": "^41.0.2",
+    "electron-builder": "^26.8.1"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3",
+    "http-proxy-agent": "^7.0.2",
+    "htmlparser2": "^12.0.0",
+    "https-proxy-agent": "^7.0.6",
+    "koffi": "^2.15.2",
+    "socks-proxy-agent": "^8.0.5"
+  }
+}

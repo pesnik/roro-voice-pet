@@ -1,0 +1,263 @@
+"use strict";
+
+const path = require("path");
+const {
+  CLAWD_SERVER_HEADER,
+  CLAWD_SERVER_ID,
+} = require("./server-config");
+const { resolveCodexOfficialHookState } = require("./server-codex-official-turns");
+const { normalizeTranscriptPath } = require("./transcript-path");
+
+// /state POST body size cap. Raised 1024 → 4096 → 16384: a CJK
+// assistant_last_output (3 UTF-8 bytes/char) on a Stop completion blew past
+// 4096, and the server's headerless 413 made the hook read posted=false, so the
+// happy animation was silently dropped for Chinese/Japanese/Korean users. Hooks
+// clamp that field by CHARACTER count while this caps by BYTE count — hooks now
+// also byte-fit the body before POST (hooks/state-payload-size.js); this cap is
+// the matching receive-side headroom. Still a local-only 127.0.0.1 endpoint —
+// not an Internet DoS concern.
+const MAX_STATE_BODY_BYTES = 16 * 1024;
+const ASSISTANT_LAST_OUTPUT_MAX = 2400;
+
+function normalizeHwndString(value) {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  if (!/^[1-9]\d{0,18}$/.test(text)) return null;
+  try {
+    return BigInt(text) <= 9223372036854775807n ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeTmuxSocket(value) {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!text || text.length > 4096 || /[\0\r\n]/.test(text)) return null;
+  if (text.startsWith("/")) return text;
+  return text !== "default" && /^[\w.-]{1,64}$/.test(text) ? text : null;
+}
+
+function normalizeTmuxClient(value) {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!text || text.length > 256 || text.startsWith("-")) return null;
+  return /^[\w./:-]+$/.test(text) ? text : null;
+}
+
+function normalizeAssistantLastOutput(value) {
+  if (typeof value !== "string") return null;
+  const text = value
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]+/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .trim();
+  if (!text) return null;
+  return text.length > ASSISTANT_LAST_OUTPUT_MAX
+    ? text.slice(0, ASSISTANT_LAST_OUTPUT_MAX)
+    : text;
+}
+
+function normalizeContextUsage(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const used = Number(value.used);
+  if (!Number.isFinite(used) || used < 0) return null;
+
+  const out = { used };
+  const limit = Number(value.limit);
+  if (Number.isFinite(limit) && limit > 0) out.limit = limit;
+
+  const percent = Number(value.percent);
+  if (Number.isFinite(percent)) {
+    out.percent = Math.max(0, Math.min(100, Math.round(percent)));
+  } else if (out.limit) {
+    out.percent = Math.max(0, Math.min(100, Math.round((used / out.limit) * 100)));
+  }
+
+  if (value.source === "claude" || value.source === "codex") out.source = value.source;
+  return out;
+}
+
+function sendStateHealthResponse(res, options) {
+  const body = JSON.stringify({ ok: true, app: CLAWD_SERVER_ID, port: options.getHookServerPort() });
+  res.writeHead(200, {
+    "Content-Type": "application/json",
+    [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID,
+  });
+  res.end(body);
+}
+
+function handleStatePost(req, res, options) {
+  const {
+    ctx,
+    createRequestHookRecorder,
+    shouldDropForDnd,
+    codexOfficialTurns,
+    pathApi = path,
+  } = options;
+  let body = "";
+  let bodySize = 0;
+  let tooLarge = false;
+  req.on("data", (chunk) => {
+    if (tooLarge) return;
+    bodySize += chunk.length;
+    if (bodySize > MAX_STATE_BODY_BYTES) { tooLarge = true; return; }
+    body += chunk;
+  });
+  req.on("end", () => {
+    if (tooLarge) {
+      res.writeHead(413);
+      res.end("state payload too large");
+      return;
+    }
+    try {
+      const data = JSON.parse(body);
+      const recordRequestHookEvent = createRequestHookRecorder(data, "state");
+      let { state, svg, session_id, event } = data;
+      let display_svg;
+      if (data.display_svg === null) display_svg = null;
+      else if (typeof data.display_svg === "string") display_svg = pathApi.basename(data.display_svg);
+      else display_svg = undefined;
+      const source_pid = Number.isFinite(data.source_pid) && data.source_pid > 0 ? Math.floor(data.source_pid) : null;
+      const wtHwnd = normalizeHwndString(data.wt_hwnd ?? data.wtHwnd);
+      const cwd = typeof data.cwd === "string" ? data.cwd : "";
+      const editor = (data.editor === "code" || data.editor === "cursor") ? data.editor : null;
+      const pidChain = Array.isArray(data.pid_chain) ? data.pid_chain.filter(n => Number.isFinite(n) && n > 0) : null;
+      const tmuxSocket = normalizeTmuxSocket(data.tmux_socket);
+      const tmuxClient = normalizeTmuxClient(data.tmux_client);
+      const rawAgentPid = data.agent_pid ?? data.claude_pid ?? data.cursor_pid;
+      const agentPid = Number.isFinite(rawAgentPid) && rawAgentPid > 0 ? Math.floor(rawAgentPid) : null;
+      // Only one caller posts to this route now: our own MiniCPM sidecar
+      // (see sidecar/gateway/clawd_state.py ClawdBridge), which always sends
+      // agent_id "claude-code". No registry lookup / multi-source hook
+      // mapping is needed anymore — just trust the field, with a safe
+      // fallback for callers that omit it.
+      const agentId = (typeof data.agent_id === "string" && data.agent_id.trim()) || "minicpm";
+      const host = typeof data.host === "string" ? data.host : null;
+      const headless = data.headless === true;
+      const platform = typeof data.platform === "string" && data.platform.trim()
+        ? data.platform.trim()
+        : null;
+      const model = typeof data.model === "string" && data.model.trim()
+        ? data.model.trim()
+        : null;
+      const provider = typeof data.provider === "string" && data.provider.trim()
+        ? data.provider.trim()
+        : null;
+      const codexOriginator = typeof data.codex_originator === "string" && data.codex_originator.trim()
+        ? data.codex_originator.trim()
+        : null;
+      const codexSource = typeof data.codex_source === "string" && data.codex_source.trim()
+        ? data.codex_source.trim()
+        : null;
+      const ghosttyTerminalId = typeof data.ghostty_terminal_id === "string" && data.ghostty_terminal_id.trim()
+        ? data.ghostty_terminal_id.trim()
+        : null;
+      const toolName = typeof data.tool_name === "string" && data.tool_name ? data.tool_name : null;
+      // Session title (Claude Code /rename or Codex turn_context.summary).
+      // Non-string / empty values are silently dropped - matches the
+      // "ignore + fall back" pattern used by cwd / agent_id above.
+      const rawTitle = typeof data.session_title === "string" ? data.session_title.trim() : "";
+      const sessionTitle = rawTitle || null;
+      const contextUsage = normalizeContextUsage(data.context_usage);
+      const assistantLastOutput = normalizeAssistantLastOutput(data.assistant_last_output);
+      const assistantLastOutputTruncated = data.assistant_last_output_truncated === true;
+      const transcriptPath = normalizeTranscriptPath(data.transcript_path);
+      const permissionSuspect = data.permission_suspect === true;
+      const preserveState = data.preserve_state === true;
+      const hookSource = typeof data.hook_source === "string" ? data.hook_source : null;
+      // #406 completion-gate inputs from the Claude Stop hook. Counts / boolean
+      // only — the hook never forwards task command or description text.
+      const backgroundTasksCount = Number.isFinite(data.background_tasks_count)
+        ? data.background_tasks_count : 0;
+      const sessionCronsCount = Number.isFinite(data.session_crons_count)
+        ? data.session_crons_count : 0;
+      const stopHookActive = data.stop_hook_active === true;
+      // Agent gate: user disabled this agent in the settings panel. Drop
+      // with 204 so hook scripts get a quick no-op response instead of
+      // hanging on our HTTP connection. Still surfaces as a success code
+      // so hook exit behavior is unchanged.
+      if (typeof ctx.isAgentEnabled === "function" && !ctx.isAgentEnabled(agentId)) {
+        recordRequestHookEvent.droppedByDisabled();
+        res.writeHead(204, { [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID });
+        res.end();
+        return;
+      }
+      if (typeof ctx.onStateEvent === "function") {
+        try { ctx.onStateEvent(data); } catch {}
+      }
+      if (ctx.STATE_SVGS[state]) {
+        const sid = session_id || "default";
+        const codexHookState = resolveCodexOfficialHookState(
+          data,
+          state,
+          codexOfficialTurns,
+          ctx.codexSubagentClassifier
+        );
+        if (codexHookState.drop) {
+          res.writeHead(204, { [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID });
+          res.end();
+          return;
+        }
+        state = codexHookState.state;
+        if (state.startsWith("mini-") && !svg) {
+          res.writeHead(400);
+          res.end("mini states require svg override");
+          return;
+        }
+        recordRequestHookEvent.acceptedUnlessDnd(shouldDropForDnd());
+        if (svg) {
+          const safeSvg = pathApi.basename(svg);
+          ctx.setState(state, safeSvg);
+        } else {
+          ctx.updateSession(sid, state, event, {
+            sourcePid: source_pid,
+            wtHwnd,
+            cwd,
+            editor,
+            pidChain,
+            tmuxSocket,
+            tmuxClient,
+            agentPid,
+            agentId,
+            host,
+            headless: headless || codexHookState.headless === true,
+            platform,
+            model,
+            provider,
+            codexOriginator,
+            codexSource,
+            ghosttyTerminalId,
+            displayHint: display_svg,
+            sessionTitle,
+            contextUsage,
+            assistantLastOutput,
+            assistantLastOutputTruncated,
+            toolName,
+            transcriptPath,
+            permissionSuspect,
+            preserveState,
+            hookSource,
+            backgroundTasksCount,
+            sessionCronsCount,
+            stopHookActive,
+          });
+        }
+        res.writeHead(200, { [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID });
+        res.end("ok");
+      } else {
+        res.writeHead(400);
+        res.end("unknown state");
+      }
+    } catch {
+      res.writeHead(400);
+      res.end("bad json");
+    }
+  });
+}
+
+module.exports = {
+  MAX_STATE_BODY_BYTES,
+  sendStateHealthResponse,
+  handleStatePost,
+};
