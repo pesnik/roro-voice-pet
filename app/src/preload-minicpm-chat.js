@@ -29,8 +29,18 @@ const CALL_CONNECT_TIMEOUT_MS = 20000;
 // never makes a sound, because nothing was ever connected to a speaker.
 let _botAudioEl = null;
 
-function _attachBotAudioTrack(track) {
+function _attachBotAudioTrack(track, participant) {
   if (!track || track.kind !== "audio") return;
+  // WavMediaManager fires onTrackStarted for the LOCAL mic track too — once
+  // on connect, and again on every unmute (enableMic(true) restarts the
+  // recorder, which re-emits it). It's the only caller that passes a
+  // `participant` arg at all, and it's always `{ id: "local", local: true }`
+  // (see localParticipant() in the transport package); the real incoming
+  // bot track fires from a separate `pc.addEventListener("track", ...)`
+  // handler that calls onTrackStarted with no second argument. Without this
+  // check, attaching the local track played the user's own mic straight
+  // back out the speakers — audible as an echo, worst right after unmute.
+  if (participant && participant.local) return;
   _detachBotAudioTrack();
   _botAudioEl = new Audio();
   _botAudioEl.autoplay = true;
@@ -75,7 +85,7 @@ function _buildCallClient(onEvent) {
       onBotTranscript: (data) => emit("bot-transcript", { text: data && data.text }),
       onDisconnected: () => { _detachBotAudioTrack(); emit("disconnected"); },
       onError: (message) => emit("error", { message: String((message && message.data) || message) }),
-      onTrackStarted: (track) => _attachBotAudioTrack(track),
+      onTrackStarted: (track, participant) => _attachBotAudioTrack(track, participant),
       onTrackStopped: (track) => { if (track === (_botAudioEl && _botAudioEl.srcObject && _botAudioEl.srcObject.getTracks()[0])) _detachBotAudioTrack(); },
     },
   });
