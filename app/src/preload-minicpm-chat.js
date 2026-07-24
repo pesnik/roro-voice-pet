@@ -2,7 +2,7 @@
 
 const { contextBridge, ipcRenderer } = require("electron");
 const { PipecatClient } = require("@pipecat-ai/client-js");
-const { SmallWebRTCTransport } = require("@pipecat-ai/small-webrtc-transport");
+const { SmallWebRTCTransport, WavMediaManager } = require("@pipecat-ai/small-webrtc-transport");
 
 // Call Mode (live voice) — the Pipecat client itself lives here, in the
 // preload's privileged (require()-capable) context, and is exposed to the
@@ -11,12 +11,54 @@ const { SmallWebRTCTransport } = require("@pipecat-ai/small-webrtc-transport");
 // of the renderer while still surfacing the capability it needs.
 let _callClient = null;
 
+// @pipecat-ai/client-js's connect() resolves only once a "bot-ready" RTVI
+// message arrives over the data channel — there's no built-in timeout, so
+// if the server-side pipeline never sends it (crashed pipeline, WebRTC
+// negotiation stuck, local STT/TTS model failing to start), the promise
+// hangs forever with zero feedback. This wraps it with a hard deadline so
+// the renderer's existing catch-block error toast can actually fire.
+const CALL_CONNECT_TIMEOUT_MS = 20000;
+
+// The bot's voice comes back over a real WebRTC audio track, not through
+// WavMediaManager's DataChannel-PCM path (that's mic-capture-only in this
+// mode) — PipecatClient only ever hands the raw MediaStreamTrack to
+// onTrackStarted and leaves playback entirely to the app (confirmed: no
+// auto-attached <audio> element anywhere in client-js). Without this, the
+// server does everything right (STT transcribes, LLM replies, Kokoro
+// synthesizes, "bot started/stopped speaking" fires) and the pet still
+// never makes a sound, because nothing was ever connected to a speaker.
+let _botAudioEl = null;
+
+function _attachBotAudioTrack(track) {
+  if (!track || track.kind !== "audio") return;
+  _detachBotAudioTrack();
+  _botAudioEl = new Audio();
+  _botAudioEl.autoplay = true;
+  _botAudioEl.srcObject = new MediaStream([track]);
+}
+
+function _detachBotAudioTrack() {
+  if (!_botAudioEl) return;
+  try { _botAudioEl.pause(); _botAudioEl.srcObject = null; } catch {}
+  _botAudioEl = null;
+}
+
 function _buildCallClient(onEvent) {
   const emit = (name, payload) => {
     try { onEvent(name, payload); } catch {}
   };
   return new PipecatClient({
-    transport: new SmallWebRTCTransport(),
+    // SmallWebRTCTransport's default media manager (DailyMediaManager) pulls
+    // in @daily-co/daily-js, which fetches a "call machine" bundle from
+    // https://c.daily.co at runtime — even though we never use Daily's
+    // transport/cloud infra, just this one client library's default device
+    // manager. Our CSP correctly blocks that as an unexpected external
+    // fetch, but the library swallows the resulting rejection internally
+    // instead of failing connect() — so Call Mode just hung on "Connecting…"
+    // forever with no error. WavMediaManager is the same package's
+    // Daily-free alternative (plain getUserMedia + Web Audio, no CDN call)
+    // and is all a WebRTC-only, fully-local call needs.
+    transport: new SmallWebRTCTransport({ mediaManager: new WavMediaManager() }),
     enableMic: true,
     enableCam: false,
     callbacks: {
@@ -24,8 +66,10 @@ function _buildCallClient(onEvent) {
       onBotStoppedSpeaking: () => emit("bot-stopped-speaking"),
       onUserStartedSpeaking: () => emit("user-started-speaking"),
       onUserStoppedSpeaking: () => emit("user-stopped-speaking"),
-      onDisconnected: () => emit("disconnected"),
+      onDisconnected: () => { _detachBotAudioTrack(); emit("disconnected"); },
       onError: (message) => emit("error", { message: String((message && message.data) || message) }),
+      onTrackStarted: (track) => _attachBotAudioTrack(track),
+      onTrackStopped: (track) => { if (track === (_botAudioEl && _botAudioEl.srcObject && _botAudioEl.srcObject.getTracks()[0])) _detachBotAudioTrack(); },
     },
   });
 }
@@ -68,8 +112,29 @@ contextBridge.exposeInMainWorld("minicpm", {
     if (_callClient) {
       try { await _callClient.disconnect(); } catch {}
     }
-    _callClient = _buildCallClient(onEvent);
-    await _callClient.connect({ webrtcUrl: offerUrl });
+    const client = _buildCallClient(onEvent);
+    _callClient = client;
+    let timedOut = false;
+    let timer = null;
+    try {
+      await Promise.race([
+        client.connect({ webrtcUrl: offerUrl }),
+        new Promise((_resolve, reject) => {
+          timer = setTimeout(() => {
+            timedOut = true;
+            reject(new Error("Call connection timed out — check sidecar logs for details."));
+          }, CALL_CONNECT_TIMEOUT_MS);
+        }),
+      ]);
+    } catch (err) {
+      if (timedOut && _callClient === client) {
+        try { await client.disconnect(); } catch {}
+        if (_callClient === client) _callClient = null;
+      }
+      throw err;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   },
   callEnd: async () => {
     if (!_callClient) return;

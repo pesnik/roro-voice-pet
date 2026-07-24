@@ -1767,6 +1767,19 @@ module.exports = function initMinicpmChat(ctx) {
     bubble.webContents.session.clearCache();
     bubble.loadFile(path.join(__dirname, "minicpm-chat.html"));
 
+    // Call Mode's WebRTC negotiation (@pipecat-ai/client-js +
+    // small-webrtc-transport) runs entirely in this window's renderer —
+    // its errors/warnings (ICE failures, getUserMedia rejections, RTVI
+    // handshake issues) only ever show in Chromium's own devtools console,
+    // invisible to anyone just watching the `go.sh start` terminal. Forward
+    // warning/error-level console messages here so a stuck "Connecting…"
+    // is actually diagnosable from the terminal log.
+    bubble.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+      if (level < 2) return; // 0=verbose, 1=info — only surface warn(2)/error(3)
+      const src = sourceId ? `${sourceId.split("/").pop()}:${line}` : "";
+      log(`[bubble-console] ${message}${src ? ` (${src})` : ""}`);
+    });
+
     bubble.webContents.on("before-input-event", (event, input) => {
       if (input.type === "keyDown" && input.key === "Escape") {
         // Renderer treats Esc itself; this is just a safety net.

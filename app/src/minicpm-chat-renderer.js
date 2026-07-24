@@ -69,7 +69,7 @@ const updPill = document.getElementById("updPill");
 const callToggleBtn = document.getElementById("callToggleBtn");
 
 // ── module state ──
-let phase = "hidden";        // hidden | starting | ask | thinking | speak | error
+let phase = "hidden";        // hidden | starting | ask | thinking | speak | call | error
 let booted = false;
 let sidecarUrl = null;
 let history = [];            // multi-turn conversation; persists across opens
@@ -149,6 +149,21 @@ async function showBubble() {
 
 async function hideBubble({ fade = true } = {}) {
   clearFade();
+  // Defense in depth: hiding the window must never silently orphan a live
+  // Call Mode session (WebRTC + mic capture + the sidecar's voice pipeline
+  // all keep running with nothing left to end them) regardless of which
+  // code path triggered the hide. Tear the call down first, but skip
+  // endCall()'s showAsk() — we're hiding, not switching to the ask view.
+  if (callActive) {
+    callActive = false;
+    if (callToggleBtn) {
+      callToggleBtn.classList.remove("active");
+      callToggleBtn.title = t("callButtonTitle");
+    }
+    if (window.minicpm && typeof window.minicpm.callEnd === "function") {
+      try { await window.minicpm.callEnd(); } catch {}
+    }
+  }
   await clearChatAnchor();
   if (!fade) {
     bubble.classList.remove("show", "fading");
@@ -380,6 +395,16 @@ async function startCall() {
   }
   callActive = true;
   callMuted = false;
+  // The 25s ask-idle-timer (armAskIdleTimer) only checks `phase === "ask"`
+  // before hiding the bubble — since nothing here used to move phase off
+  // "ask", a timer armed right as the call started (e.g. by the textarea's
+  // blur when the user clicked the call button) would fire mid-call and
+  // yank the bubble out from under a live connection, with callEnd() never
+  // called: the WebRTC session, mic capture, and sidecar pipeline all kept
+  // running orphaned in the background. clearFade() here cancels any timer
+  // already armed from before the call started.
+  phase = "call";
+  clearFade();
   if (callToggleBtn) {
     callToggleBtn.classList.add("active");
     callToggleBtn.title = t("callEndButtonTitle");
@@ -658,7 +683,11 @@ function naturalAskWidth(text) {
   widthMeasurer.style.font = window.getComputedStyle(content).font;
   widthMeasurer.textContent = sample;
   const textW = widthMeasurer.offsetWidth;
-  return Math.max(80, Math.min(320, Math.round(textW + 32)));
+  // +32 for the bubble's own horizontal padding, +20 to match #ask-input's
+  // padding-left (reserved so text clears the always-visible call-toggle
+  // icon in the top-left corner) — without it this pill sizes itself as if
+  // the textarea had the full width, and the text clips/wraps early.
+  return Math.max(80, Math.min(320, Math.round(textW + 32 + 20)));
 }
 
 // For fixed-text panels (command replies, errors, narration, speak phase, …)
@@ -1418,7 +1447,7 @@ function exitEditMode() {
 // ── Narration: ambient one-line reaction to coding-agent events ────────
 async function showNarration({ text, kind }) {
   if (!text) return;
-  if (phase === "speak" || phase === "think-stream") return;
+  if (phase === "speak" || phase === "think-stream" || phase === "call") return;
   if (abortCtrl) { try { abortCtrl.abort(); } catch {} abortCtrl = null; }
 
   clearFade();

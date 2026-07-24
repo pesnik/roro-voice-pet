@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src http://127.0.0.1:18765 http://localhost:18765; img-src 'self' data:;">
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' blob:; connect-src http://127.0.0.1:18765 http://localhost:18765; img-src 'self' data:;">
 <title>MiniCPM</title>
 <style>
   :root {
@@ -106,6 +106,14 @@
     user-select: text;
     -webkit-app-region: no-drag;
     display: block;
+  }
+  /* .call-toggle-btn is an always-visible absolute-positioned overlay in
+     the bubble's top-left corner (see below) — #ask-input renders flush
+     with that same corner in both ask layouts (the compact first-open
+     pill has no wrapper at all), so without this it sits directly under
+     the icon and the placeholder text/icon visually overlap. */
+  #ask-input {
+    padding-left: 20px;
   }
   textarea::placeholder { color: var(--muted); }
 
