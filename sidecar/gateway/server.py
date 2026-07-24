@@ -42,7 +42,7 @@ from .openrouter_client import OpenRouterClient
 from .think_filter import ThinkBlockFilter
 from .updater import DEFAULT_SOURCE as DEFAULT_UPDATE_SOURCE
 from .updater import ModelUpdater
-from . import whisper_cpp_stt
+from .voice_assets import ensure_voice_assets, voice_assets_ready
 from .whisper_cpp_stt import WhisperCppServer
 
 
@@ -521,23 +521,42 @@ def build_app(
     def call_status():
         """Whether Call Mode's local STT/TTS assets are already downloaded —
         powers the Settings → Call section so users see a real status
-        instead of guessing why the first call is slow. Both engines
-        download lazily on first use (whisper_cpp_stt.ensure_whisper_model,
-        Pipecat's own KokoroTTSService), so this is a pure filesystem check,
-        not a trigger."""
-        whisper_path = _default_whisper_model_dir() / whisper_cpp_stt.DEFAULT_MODEL_FILENAME
-        kokoro_dir = Path.home() / ".cache" / "pipecat" / "kokoro-onnx"
-        return {
-            "whisper": {
-                "ready": whisper_path.is_file(),
-                "path": str(whisper_path),
-            },
-            "kokoro": {
-                "ready": (kokoro_dir / "kokoro-v1.0.onnx").is_file()
-                and (kokoro_dir / "voices-v1.0.bin").is_file(),
-                "path": str(kokoro_dir),
-            },
-        }
+        instead of guessing why the first call is slow. A pure filesystem
+        check, not a trigger — see POST /api/call/prepare for that."""
+        return voice_assets_ready(whisper_dir=_default_whisper_model_dir())
+
+    @app.post("/api/call/prepare")
+    async def call_prepare():
+        """Downloads Call Mode's local STT/TTS assets with real byte-level
+        progress over SSE, so the first call doesn't just sit on a
+        "Connecting…" spinner for however long a ~400MB download takes.
+        No-ops fast (a handful of "skip" events) once assets are cached.
+        Electron calls this before opening the actual WebRTC connection."""
+        import threading as _t
+
+        async def stream():
+            queue: asyncio.Queue = asyncio.Queue()
+            sentinel = object()
+            loop = asyncio.get_running_loop()
+
+            def producer():
+                try:
+                    for ev in ensure_voice_assets(whisper_dir=_default_whisper_model_dir()):
+                        loop.call_soon_threadsafe(queue.put_nowait, ev)
+                    loop.call_soon_threadsafe(queue.put_nowait, {"phase": "complete"})
+                except Exception as exc:
+                    loop.call_soon_threadsafe(queue.put_nowait, {"phase": "error", "message": str(exc)})
+                finally:
+                    loop.call_soon_threadsafe(queue.put_nowait, sentinel)
+
+            _t.Thread(target=producer, daemon=True).start()
+            while True:
+                ev = await queue.get()
+                if ev is sentinel:
+                    break
+                yield _sse(ev)
+
+        return StreamingResponse(stream(), media_type="text/event-stream")
 
     @app.get("/api/devices")
     def list_devices():
@@ -960,7 +979,7 @@ def build_app(
                 "/api/devices", "/api/set-device", "/api/onboarding",
                 "/api/update-check", "/api/update-apply",
                 "/api/adapters", "/api/load-adapter", "/api/classify",
-                "/api/state", "/api/call/offer", "/api/call/status",
+                "/api/state", "/api/call/offer", "/api/call/status", "/api/call/prepare",
             ],
         })
 

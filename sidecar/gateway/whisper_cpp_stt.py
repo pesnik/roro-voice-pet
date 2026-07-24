@@ -40,9 +40,10 @@ from .lifecycle import (
 )
 from .llama_client import _find_free_port, _platform_triple
 from .log_setup import get_logger
+from .voice_assets import WHISPER_MODEL_FILENAME, download_one
 
-DEFAULT_MODEL_REPO = "ggerganov/whisper.cpp"
-DEFAULT_MODEL_FILENAME = "ggml-base.en.bin"
+# Re-exported for callers/tests that predate voice_assets.py.
+DEFAULT_MODEL_FILENAME = WHISPER_MODEL_FILENAME
 
 
 def _candidate_binary_paths() -> list[Path]:
@@ -85,22 +86,21 @@ def _candidate_binary_paths() -> list[Path]:
     return unique
 
 
-def ensure_whisper_model(
-    models_dir: Path, *, repo_id: str = DEFAULT_MODEL_REPO, filename: str = DEFAULT_MODEL_FILENAME
-) -> Path:
+def ensure_whisper_model(models_dir: Path, *, filename: str = DEFAULT_MODEL_FILENAME) -> Path:
     """Lazily download the default ggml Whisper model on first use.
 
-    A single static file from a fixed HF repo — no versioning/update-check
-    machinery needed here, unlike the LLM .gguf's ModelUpdater.
+    Synchronous fallback for WhisperCppServer.start() when a call begins
+    without going through the /api/call/prepare progress route first
+    (e.g. an older client). Drains voice_assets.download_one's progress
+    generator to completion rather than reporting it anywhere — same
+    retrying, atomic-write download either way.
     """
-    target = models_dir / filename
-    if target.is_file():
-        return target
-    from huggingface_hub import hf_hub_download
+    from .voice_assets import WHISPER_MODEL_URL
 
-    models_dir.mkdir(parents=True, exist_ok=True)
-    downloaded = hf_hub_download(repo_id=repo_id, filename=filename, local_dir=str(models_dir))
-    return Path(downloaded)
+    target = models_dir / filename
+    for _ in download_one(WHISPER_MODEL_URL, target, asset="whisper"):
+        pass
+    return target
 
 
 class WhisperCppServer:

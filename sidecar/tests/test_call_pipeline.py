@@ -34,33 +34,38 @@ def test_whisper_server_binary_override(monkeypatch, tmp_path):
 
 
 def test_ensure_whisper_model_skips_download_when_present(monkeypatch, tmp_path):
+    # download_one itself (not ensure_whisper_model) owns the "already
+    # exists, don't touch the network" check — exercise that for real
+    # rather than mocking it away, by making any actual HTTP call blow up.
     existing = tmp_path / whisper_cpp_stt.DEFAULT_MODEL_FILENAME
     existing.write_bytes(b"fake-model")
 
     def _boom(*_args, **_kwargs):
-        raise AssertionError("hf_hub_download should not be called when the model already exists")
+        raise AssertionError("httpx.stream should not be called when the model already exists")
 
-    monkeypatch.setattr("huggingface_hub.hf_hub_download", _boom)
+    monkeypatch.setattr(whisper_cpp_stt.httpx, "stream", _boom)
 
     result = whisper_cpp_stt.ensure_whisper_model(tmp_path)
 
     assert result == existing
+    assert existing.read_bytes() == b"fake-model"
 
 
-def test_ensure_whisper_model_downloads_when_missing(monkeypatch, tmp_path):
+def test_ensure_whisper_model_delegates_to_voice_assets_downloader(monkeypatch, tmp_path):
     calls = []
 
-    def _fake_download(*, repo_id, filename, local_dir):
-        calls.append((repo_id, filename, local_dir))
-        target = Path(local_dir) / filename
-        target.write_bytes(b"fake-model")
-        return str(target)
+    def _fake_download_one(url, dest, *, asset):
+        calls.append((url, dest, asset))
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"fake-model")
+        yield {"phase": "done", "asset": asset, "file": dest.name}
 
-    monkeypatch.setattr("huggingface_hub.hf_hub_download", _fake_download)
+    monkeypatch.setattr(whisper_cpp_stt, "download_one", _fake_download_one)
 
     result = whisper_cpp_stt.ensure_whisper_model(tmp_path)
 
     assert result == tmp_path / whisper_cpp_stt.DEFAULT_MODEL_FILENAME
-    assert calls == [
-        (whisper_cpp_stt.DEFAULT_MODEL_REPO, whisper_cpp_stt.DEFAULT_MODEL_FILENAME, str(tmp_path))
-    ]
+    assert result.read_bytes() == b"fake-model"
+    assert len(calls) == 1
+    assert calls[0][1] == tmp_path / whisper_cpp_stt.DEFAULT_MODEL_FILENAME
+    assert calls[0][2] == "whisper"

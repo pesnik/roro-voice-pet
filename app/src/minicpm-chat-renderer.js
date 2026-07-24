@@ -386,21 +386,20 @@ async function startCall() {
   }
   renderCallStatus("callConnecting");
   await measureAndShow();
-  // The very first call on a fresh install downloads the local STT/TTS
-  // models (whisper.cpp + Kokoro, ~200-400MB total) before the pipeline
-  // can come up — that can take well past a normal "connecting" delay.
-  // No real progress signal crosses the WebRTC offer/answer handshake, so
-  // this is a client-side heuristic: still connecting after a few seconds
-  // almost certainly means a download is in progress, not a stall.
-  const downloadHintTimer = setTimeout(() => {
-    if (callActive) setCallStatusText("callDownloadingModels");
-  }, 4000);
   try {
+    // The very first call downloads local STT/TTS models (~400MB total)
+    // before the pipeline can come up. That can't happen inside the
+    // WebRTC offer/answer request (a single request/response, no room
+    // for incremental progress) so it's a separate pre-flight step with
+    // its own SSE progress stream — no-ops in a couple of "skip" events
+    // once assets are cached, same as the LLM .gguf downloader.
+    if (!(await prepareCallAssets())) return; // user cancelled / error already shown
+    if (!callActive) return; // ended while downloading
+    renderCallStatus("callConnecting");
+    await measureAndShow();
     await window.minicpm.callStart(sidecarUrl + "/api/call/offer", onCallEvent);
-    clearTimeout(downloadHintTimer);
     if (callActive) setCallStatusText("callListening");
   } catch (err) {
-    clearTimeout(downloadHintTimer);
     callActive = false;
     if (callToggleBtn) {
       callToggleBtn.classList.remove("active");
@@ -409,6 +408,72 @@ async function startCall() {
     showToast(t("callError", { error: (err && err.message) || String(err) }));
     await showAsk();
   }
+}
+
+// Streams POST /api/call/prepare's SSE progress into the same
+// .upd-progress bar the LLM model updater uses (update-bubble.js /
+// showUpdateProgress) — reused, not reinvented. Resolves true once
+// assets are ready (immediately, if already cached), false on error
+// (toast already shown) or if the call was ended mid-download.
+async function prepareCallAssets() {
+  let progressEl = null;
+  const mb = (n) => (n / (1024 * 1024)).toFixed(1);
+
+  const ensureProgressUi = () => {
+    if (progressEl) return;
+    phase = "speak"; // borrow, same as showUpdateProgress — suppresses ask-idle-timer/toast interference
+    content.innerHTML =
+      '<div class="upd-progress">' +
+        '<div id="call-dl-text">' + escapeHtml(t("callDownloadingModels")) + '</div>' +
+        '<div class="bar"><i id="call-dl-bar"></i></div>' +
+      '</div>';
+    progressEl = {
+      text: document.getElementById("call-dl-text"),
+      bar: document.getElementById("call-dl-bar"),
+    };
+    measureAndShow({ width: 280 });
+  };
+
+  let resp;
+  try {
+    resp = await fetch(sidecarUrl + "/api/call/prepare", { method: "POST" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+  } catch (err) {
+    if (callActive) showToast(t("callError", { error: (err && err.message) || String(err) }));
+    return false;
+  }
+
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  while (true) {
+    if (!callActive) { try { await reader.cancel(); } catch {} return false; }
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      if (!block.startsWith("data:")) continue;
+      let ev;
+      try { ev = JSON.parse(block.slice(5).trim()); } catch { continue; }
+
+      if (ev.phase === "transfer" && ev.bytes_total > 0) {
+        ensureProgressUi();
+        const pct = Math.min(100, (ev.bytes_done / ev.bytes_total) * 100);
+        progressEl.bar.style.width = pct.toFixed(1) + "%";
+        progressEl.text.textContent =
+          t("callDownloadingModels") + ` ${mb(ev.bytes_done)} / ${mb(ev.bytes_total)} MB`;
+      } else if (ev.phase === "error") {
+        if (callActive) showToast(t("callError", { error: ev.message || "download failed" }));
+        return false;
+      } else if (ev.phase === "complete") {
+        return true;
+      }
+    }
+  }
+  return true;
 }
 
 async function endCall(opts) {
