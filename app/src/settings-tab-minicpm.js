@@ -445,13 +445,58 @@
     box.appendChild(section);
   }
 
-  // Backend choice for Call Mode is the *same* chat-backend selector in
-  // renderBehaviorSection above, not a separate setting — this section
-  // only surfaces whether the local STT/TTS assets Call Mode needs are
-  // already downloaded (both fetch lazily on first call, so there's
-  // nothing to trigger from here, just status to show).
+  // This section surfaces whether the local STT/TTS assets Call Mode
+  // needs are already downloaded (both fetch lazily on first call), plus
+  // the STT/TTS engine toggle — independent of the chat-LLM backend
+  // selector in renderBehaviorSection above, since a call's transcription/
+  // speech engines can be local while the chat backend is cloud, or vice
+  // versa.
   async function renderCallSection(box, ctx) {
     box.innerHTML = "";
+
+    // Local-vs-OpenAI-compatible toggle row, shared shape for STT and TTS.
+    // Finer config (API key / base URL / model / voice) is env-var only
+    // (STT_API_KEY etc., see server.py's resolve_stt_config/resolve_tts_config)
+    // rather than duplicated as text inputs here, mirroring how Hermes/
+    // OpenRouter's own finer config already works outside Settings.
+    function renderVoiceBackendRow(rows, { labelKey, descKey, current, onSet }) {
+      const row = el("div", { className: "row" });
+      const text = el("div", { className: "row-text" });
+      text.appendChild(el("span", { className: "row-label" }, t(labelKey)));
+      text.appendChild(el("span", { className: "row-desc" }, t(descKey)));
+      row.appendChild(text);
+      const segmented = el("div", { className: "segmented minicpm-backend-segmented" });
+      for (const mode of ["local", "openai"]) {
+        const btn = el("button", {
+          type: "button",
+          className: current === mode ? "active" : "",
+          onClick: async () => {
+            if (btn.disabled || current === mode) return;
+            Array.from(segmented.querySelectorAll("button")).forEach((b) => { b.disabled = true; });
+            try {
+              const ret = await onSet(mode);
+              if (ret && ret.ok === false) {
+                if (ops && typeof ops.showToast === "function") {
+                  ops.showToast(t("toastSaveFailed") + (ret.error || "unknown error"), { error: true });
+                }
+              }
+            } catch (err) {
+              if (ops && typeof ops.showToast === "function") {
+                ops.showToast(t("toastSaveFailed") + (err && err.message || ""), { error: true });
+              }
+            } finally {
+              void ctx.refreshAll();
+            }
+          },
+        }, t(mode === "local" ? "minicpmVoiceBackendLocal" : "minicpmVoiceBackendOpenai"));
+        segmented.appendChild(btn);
+      }
+      const ctl = el("div", { className: "row-control" });
+      ctl.appendChild(segmented);
+      row.appendChild(ctl);
+      rows.appendChild(row);
+    }
+
     let status = null;
     try { status = await window.minicpmSettings.getCallStatus(); } catch {}
     const whisperReady = !!(status && status.whisper && status.whisper.ready);
@@ -476,6 +521,29 @@
       ));
       rows.appendChild(row);
     }
+
+    if (window.minicpmSettings.getSttBackend && window.minicpmSettings.setSttBackend) {
+      let sttMode = "local";
+      try { sttMode = await window.minicpmSettings.getSttBackend(); } catch {}
+      renderVoiceBackendRow(rows, {
+        labelKey: "minicpmRowSttBackend",
+        descKey: "minicpmRowSttBackendDesc",
+        current: sttMode || "local",
+        onSet: (mode) => window.minicpmSettings.setSttBackend(mode),
+      });
+    }
+
+    if (window.minicpmSettings.getTtsBackend && window.minicpmSettings.setTtsBackend) {
+      let ttsMode = "local";
+      try { ttsMode = await window.minicpmSettings.getTtsBackend(); } catch {}
+      renderVoiceBackendRow(rows, {
+        labelKey: "minicpmRowTtsBackend",
+        descKey: "minicpmRowTtsBackendDesc",
+        current: ttsMode || "local",
+        onSet: (mode) => window.minicpmSettings.setTtsBackend(mode),
+      });
+    }
+
     box.appendChild(section);
   }
 

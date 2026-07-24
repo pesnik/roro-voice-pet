@@ -4,8 +4,11 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from gateway import call_pipeline
 from gateway import server as server_mod
 from gateway import whisper_cpp_stt
+from gateway.call_pipeline import STTConfig, TTSConfig
+from gateway.whisper_cpp_stt import WhisperCppSTTService
 
 
 def test_call_offer_route_registered_for_every_backend():
@@ -21,6 +24,72 @@ def test_call_offer_route_registered_for_every_backend():
             # needing a real WebRTC offer/answer negotiation.
             response = client.post("/api/call/offer", json={"not": "a real offer"})
         assert response.status_code == 422, backend
+
+
+def test_build_stt_defaults_to_local_whisper_cpp():
+    stt = call_pipeline._build_stt(STTConfig(), whisper_server="fake-server")
+
+    assert isinstance(stt, WhisperCppSTTService)
+    assert stt._server == "fake-server"
+
+
+def test_build_stt_openai_backend_uses_configured_endpoint(monkeypatch):
+    captured = {}
+
+    class _FakeSettings:
+        def __init__(self, *, model):
+            self.model = model
+
+    class _FakeOpenAISTTService:
+        Settings = _FakeSettings
+
+        def __init__(self, *, api_key, base_url, settings):
+            captured["api_key"] = api_key
+            captured["base_url"] = base_url
+            captured["settings"] = settings
+
+    monkeypatch.setattr(call_pipeline, "OpenAISTTService", _FakeOpenAISTTService)
+
+    cfg = STTConfig(backend="openai", api_key="sk-test", base_url="https://api.openai.com/v1", model="whisper-1")
+    stt = call_pipeline._build_stt(cfg, whisper_server="unused")
+
+    assert isinstance(stt, _FakeOpenAISTTService)
+    assert captured["api_key"] == "sk-test"
+    assert captured["base_url"] == "https://api.openai.com/v1"
+    assert captured["settings"].model == "whisper-1"
+
+
+def test_build_tts_defaults_to_local_kokoro(monkeypatch):
+    monkeypatch.setattr(call_pipeline, "KokoroTTSService", lambda: "kokoro-instance")
+
+    assert call_pipeline._build_tts(TTSConfig()) == "kokoro-instance"
+
+
+def test_build_tts_openai_backend_uses_configured_voice(monkeypatch):
+    captured = {}
+
+    class _FakeSettings:
+        def __init__(self, *, model, voice):
+            self.model = model
+            self.voice = voice
+
+    class _FakeOpenAITTSService:
+        Settings = _FakeSettings
+
+        def __init__(self, *, api_key, base_url, settings):
+            captured["api_key"] = api_key
+            captured["base_url"] = base_url
+            captured["settings"] = settings
+
+    monkeypatch.setattr(call_pipeline, "OpenAITTSService", _FakeOpenAITTSService)
+
+    cfg = TTSConfig(backend="openai", api_key="sk-test", voice="alloy", model="gpt-4o-mini-tts")
+    tts = call_pipeline._build_tts(cfg)
+
+    assert isinstance(tts, _FakeOpenAITTSService)
+    assert captured["api_key"] == "sk-test"
+    assert captured["settings"].voice == "alloy"
+    assert captured["settings"].model == "gpt-4o-mini-tts"
 
 
 def test_whisper_server_binary_override(monkeypatch, tmp_path):

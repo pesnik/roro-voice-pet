@@ -33,7 +33,7 @@ from pipecat.transports.smallwebrtc.request_handler import (
     SmallWebRTCRequestHandler,
 )
 
-from .call_pipeline import LLMEndpoint, build_call_bot
+from .call_pipeline import LLMEndpoint, STTConfig, TTSConfig, build_call_bot
 from .clawd_state import ClawdBridge
 from .hermes_client import HermesClient
 from .llama_client import LlamaServer, detect_backend
@@ -374,6 +374,33 @@ def build_app(
             base_url=f"http://{server.host}:{server.port}/v1",
             api_key="not-needed",
             model=server.model_path.name if server.model_path else "local",
+        )
+
+    def resolve_stt_config() -> STTConfig:
+        """Which speech-to-text engine Call Mode should use — independent
+        of the chat LLM backend. Read fresh per call (env, not a snapshot
+        at boot) so a Settings change + sidecar restart is picked up the
+        same way resolve_llm_endpoint already works. Defaults to fully
+        local (whisper.cpp); "openai" points at any /v1/audio/transcriptions
+        -compatible endpoint (OpenAI itself, or a compatible self-hosted/
+        third-party service — NOT OpenRouter, which has no audio API)."""
+        return STTConfig(
+            backend=os.environ.get("MINICPM_STT_BACKEND", "local").strip().lower() or "local",
+            api_key=os.environ.get("STT_API_KEY", ""),
+            base_url=os.environ.get("STT_BASE_URL", ""),
+            model=os.environ.get("STT_MODEL", ""),
+        )
+
+    def resolve_tts_config() -> TTSConfig:
+        """Same shape as resolve_stt_config, for text-to-speech. Defaults to
+        fully local (Kokoro); "openai" points at any /v1/audio/speech
+        -compatible endpoint."""
+        return TTSConfig(
+            backend=os.environ.get("MINICPM_TTS_BACKEND", "local").strip().lower() or "local",
+            api_key=os.environ.get("TTS_API_KEY", ""),
+            base_url=os.environ.get("TTS_BASE_URL", ""),
+            model=os.environ.get("TTS_MODEL", ""),
+            voice=os.environ.get("TTS_VOICE", ""),
         )
 
     # Call Mode's local STT — a single long-lived whisper-server shared
@@ -944,6 +971,8 @@ def build_app(
     # actual STT -> LLM -> TTS pipeline; this is just the signaling route.
     call_bot = build_call_bot(
         resolve_llm_endpoint=resolve_llm_endpoint,
+        resolve_stt_config=resolve_stt_config,
+        resolve_tts_config=resolve_tts_config,
         whisper_server=whisper_server,
         bridge=bridge,
     )

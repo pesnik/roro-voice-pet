@@ -1308,6 +1308,20 @@ module.exports = function initMinicpmChat(ctx) {
     } catch {}
   }
 
+  // Same restoration for Call Mode's STT/TTS backend choice (local vs
+  // OpenAI-compatible) — independent of the chat LLM backend above.
+  if (!process.env.MINICPM_STT_BACKEND || !process.env.MINICPM_TTS_BACKEND) {
+    try {
+      const mp = readMinicpmPrefsRaw();
+      if (!process.env.MINICPM_STT_BACKEND && mp && typeof mp.stt_backend === "string" && mp.stt_backend.trim()) {
+        process.env.MINICPM_STT_BACKEND = mp.stt_backend.trim();
+      }
+      if (!process.env.MINICPM_TTS_BACKEND && mp && typeof mp.tts_backend === "string" && mp.tts_backend.trim()) {
+        process.env.MINICPM_TTS_BACKEND = mp.tts_backend.trim();
+      }
+    } catch {}
+  }
+
   let bubble = null;
   let activeSide = "right";
   // Updated from /api/health after the sidecar comes online — drives the
@@ -2640,6 +2654,37 @@ module.exports = function initMinicpmChat(ctx) {
       } catch (err) {
         return { ok: false, error: String(err && err.message || err) };
       }
+    },
+    "minicpm-settings:get-stt-backend": async () => {
+      return process.env.MINICPM_STT_BACKEND || "local";
+    },
+    "minicpm-settings:set-stt-backend": async (_evt, payload) => {
+      const mode = (payload && payload.mode) || "local";
+      const validModes = ["local", "openai"];
+      if (!validModes.includes(mode)) {
+        return { ok: false, error: `Invalid STT backend: ${mode}` };
+      }
+      process.env.MINICPM_STT_BACKEND = mode;
+      mergeMinicpmPrefs({ stt_backend: mode });
+      // Unlike the chat-LLM backend selector, Call Mode's STT/TTS engine is
+      // only re-resolved when a new call starts a fresh pipeline — but the
+      // sidecar process itself doesn't need restarting for that (no model
+      // is loaded at boot for either engine), so a restart here would just
+      // be a needless several-second interruption to any in-progress chat.
+      return { ok: true, mode };
+    },
+    "minicpm-settings:get-tts-backend": async () => {
+      return process.env.MINICPM_TTS_BACKEND || "local";
+    },
+    "minicpm-settings:set-tts-backend": async (_evt, payload) => {
+      const mode = (payload && payload.mode) || "local";
+      const validModes = ["local", "openai"];
+      if (!validModes.includes(mode)) {
+        return { ok: false, error: `Invalid TTS backend: ${mode}` };
+      }
+      process.env.MINICPM_TTS_BACKEND = mode;
+      mergeMinicpmPrefs({ tts_backend: mode });
+      return { ok: true, mode };
     },
 
     // ── Local model directory override ──────────────────────────────────

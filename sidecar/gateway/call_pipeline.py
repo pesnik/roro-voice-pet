@@ -37,6 +37,8 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.kokoro.tts import KokoroTTSService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.openai.stt import OpenAISTTService
+from pipecat.services.openai.tts import OpenAITTSService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -53,6 +55,37 @@ class LLMEndpoint:
     base_url: str
     api_key: str
     model: str
+
+
+@dataclass(frozen=True)
+class STTConfig:
+    """Which speech-to-text engine a call should use.
+
+    "local" (default) is whisper.cpp, fully offline. "openai" is any
+    endpoint speaking the OpenAI /v1/audio/transcriptions schema — OpenAI
+    itself, or a compatible self-hosted/third-party service (NOT
+    OpenRouter, which only proxies chat completions and has no audio
+    API). base_url/model empty string means "use the service's own
+    default" (api.openai.com, whisper-1).
+    """
+
+    backend: str = "local"
+    api_key: str = ""
+    base_url: str = ""
+    model: str = ""
+
+
+@dataclass(frozen=True)
+class TTSConfig:
+    """Which text-to-speech engine a call should use — same shape as
+    STTConfig. "local" is Kokoro. "openai" is any /v1/audio/speech
+    -compatible endpoint."""
+
+    backend: str = "local"
+    api_key: str = ""
+    base_url: str = ""
+    model: str = ""
+    voice: str = ""
 
 
 class _PetStateBridgeProcessor(FrameProcessor):
@@ -78,9 +111,33 @@ class _PetStateBridgeProcessor(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+def _build_stt(cfg: STTConfig, whisper_server: WhisperCppServer):
+    if cfg.backend == "openai":
+        return OpenAISTTService(
+            api_key=cfg.api_key or None,
+            base_url=cfg.base_url or None,
+            settings=OpenAISTTService.Settings(model=cfg.model) if cfg.model else None,
+        )
+    return WhisperCppSTTService(server=whisper_server)
+
+
+def _build_tts(cfg: TTSConfig):
+    if cfg.backend == "openai":
+        return OpenAITTSService(
+            api_key=cfg.api_key or None,
+            base_url=cfg.base_url or None,
+            settings=OpenAITTSService.Settings(model=cfg.model, voice=cfg.voice)
+            if (cfg.model or cfg.voice)
+            else None,
+        )
+    return KokoroTTSService()
+
+
 def build_call_bot(
     *,
     resolve_llm_endpoint: Callable[[], LLMEndpoint],
+    resolve_stt_config: Callable[[], STTConfig],
+    resolve_tts_config: Callable[[], TTSConfig],
     whisper_server: WhisperCppServer,
     bridge: ClawdBridge,
     system_prompt: Optional[str] = None,
@@ -88,16 +145,19 @@ def build_call_bot(
     """Return a Pipecat ``bot(runner_args)`` entry point bound to this
     gateway's backend resolution + pet-state bridge.
 
-    ``resolve_llm_endpoint`` is called fresh for every call (not memoized) so
-    a just-started llama-server's dynamically-assigned port, or a backend
-    switch made in Settings, is picked up on the next call without a gateway
-    restart — mirrors how /api/chat re-reads the live ``server`` object on
-    every request rather than snapshotting it at boot.
+    ``resolve_llm_endpoint`` / ``resolve_stt_config`` / ``resolve_tts_config``
+    are all called fresh for every call (not memoized) so a just-started
+    llama-server's dynamically-assigned port, or a backend switch made in
+    Settings, is picked up on the next call without a gateway restart —
+    mirrors how /api/chat re-reads the live ``server`` object on every
+    request rather than snapshotting it at boot.
 
     ``whisper_server`` is shared across calls (started lazily on the first
     one, mirroring how llama-server itself is a single long-lived
     subprocess) rather than spawned fresh per call — model load alone is
-    ~150-200ms, not worth paying on every call start.
+    ~150-200ms, not worth paying on every call start. Only actually used
+    when the resolved STT backend is "local"; harmless to always pass in
+    otherwise since it stays unstarted.
     """
 
     async def run_bot(runner_args: RunnerArguments) -> None:
@@ -113,8 +173,8 @@ def build_call_bot(
         )
 
         endpoint = resolve_llm_endpoint()
-        stt = WhisperCppSTTService(server=whisper_server)
-        tts = KokoroTTSService()
+        stt = _build_stt(resolve_stt_config(), whisper_server)
+        tts = _build_tts(resolve_tts_config())
         llm = OpenAILLMService(
             base_url=endpoint.base_url,
             api_key=endpoint.api_key,
