@@ -1,9 +1,11 @@
 """FastAPI gateway in front of llama.cpp's llama-server.
 
 Exposes the same HTTP/SSE contract the Electron app already speaks with
-the legacy PyTorch sidecar, so the renderer (clawd-on-desk/src/minicpm-chat.*)
+the legacy PyTorch sidecar, so the renderer (app/src/minicpm-chat.*)
 does not need to change. The actual inference happens in the subprocess
-owned by `LlamaServer`; this file is just glue.
+owned by `LlamaServer`; this file is just glue. Also hosts the Pipecat
+live-voice "Call Mode" pipeline (see call_pipeline.py) behind
+POST /api/call/offer, reusing the same backend resolution as /api/chat.
 """
 
 from __future__ import annotations
@@ -13,15 +15,25 @@ import json
 import os
 import platform
 import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator, List, Optional
 
-from fastapi import FastAPI
+from fastapi import BackgroundTasks, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from pipecat.runner.types import SmallWebRTCRunnerArguments
+from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
+from pipecat.transports.smallwebrtc.request_handler import (
+    SmallWebRTCPatchRequest,
+    SmallWebRTCRequest,
+    SmallWebRTCRequestHandler,
+)
+
+from .call_pipeline import LLMEndpoint, build_call_bot
 from .clawd_state import ClawdBridge
 from .hermes_client import HermesClient
 from .llama_client import LlamaServer, detect_backend
@@ -30,6 +42,7 @@ from .openrouter_client import OpenRouterClient
 from .think_filter import ThinkBlockFilter
 from .updater import DEFAULT_SOURCE as DEFAULT_UPDATE_SOURCE
 from .updater import ModelUpdater
+from .whisper_cpp_stt import WhisperCppServer
 
 
 # ── Request / response shapes ────────────────────────────────────────────────
@@ -107,8 +120,8 @@ def _default_model_roots() -> List[Path]:
     only used by direct CLI / dev runs."""
     here = Path(__file__).resolve().parent.parent
     return [
-        Path.home() / "Library" / "Application Support" / "Clawd on Desk" / "models",
-        Path.home() / ".local" / "share" / "Clawd on Desk" / "models",
+        Path.home() / "Library" / "Application Support" / "RoRo Voice Pet" / "models",
+        Path.home() / ".local" / "share" / "RoRo Voice Pet" / "models",
         here / "models",
         here.parent / "models",
     ]
@@ -152,10 +165,29 @@ def _default_adapter_roots() -> List[Path]:
     """
     here = Path(__file__).resolve().parent.parent
     return [
-        Path.home() / "Library" / "Application Support" / "Clawd on Desk" / "adapters",
-        Path.home() / ".local" / "share" / "Clawd on Desk" / "adapters",
+        Path.home() / "Library" / "Application Support" / "RoRo Voice Pet" / "adapters",
+        Path.home() / ".local" / "share" / "RoRo Voice Pet" / "adapters",
         here.parent / "adapters",   # <repo>/adapters/ in dev checkouts
     ]
+
+
+def _default_whisper_model_dir() -> Path:
+    """Where the Call Mode STT model (ggml-base.en.bin) lives when no
+    explicit MINICPM_WHISPER_MODEL_DIR env is set. Mirrors
+    `_default_adapter_roots`'s per-user-app-data-first, dev-repo-fallback
+    order; only one location is needed here since it's a single fixed file,
+    not a directory to scan."""
+    env_dir = os.environ.get("MINICPM_WHISPER_MODEL_DIR")
+    if env_dir:
+        return Path(env_dir).expanduser()
+    here = Path(__file__).resolve().parent.parent
+    for cand in (
+        Path.home() / "Library" / "Application Support" / "RoRo Voice Pet" / "whisper",
+        Path.home() / ".local" / "share" / "RoRo Voice Pet" / "whisper",
+    ):
+        if cand.is_dir():
+            return cand
+    return here.parent / "models" / "whisper"
 
 
 def discover_adapters(roots: List[Path]) -> List[dict]:
@@ -324,6 +356,31 @@ def build_app(
             adapters=[initial_active] if initial_active else [],
         )
 
+    def resolve_llm_endpoint() -> LLMEndpoint:
+        """Resolve the OpenAI-compatible chat endpoint for the *currently*
+        selected backend — called fresh per Call Mode call (not memoized)
+        so a live backend switch in Settings, or llama-server's
+        dynamically-assigned port, is always picked up. Mirrors exactly
+        what /api/chat already routes to for typed chat; Call Mode is
+        deliberately not a separate backend choice."""
+        if is_openrouter:
+            return LLMEndpoint(base_url=server.base_url, api_key=server.api_key, model=server.model)
+        if is_hermes:
+            return LLMEndpoint(base_url=server.base_url, api_key=server.api_key, model=server.model)
+        if not server.port:
+            raise RuntimeError("llama-server not running — open Onboarding to download the model")
+        return LLMEndpoint(
+            base_url=f"http://{server.host}:{server.port}/v1",
+            api_key="not-needed",
+            model=server.model_path.name if server.model_path else "local",
+        )
+
+    # Call Mode's local STT — a single long-lived whisper-server shared
+    # across calls (lazy-started on first use, like llama-server itself),
+    # not spawned fresh per call. Model itself is lazy-downloaded inside
+    # whisper_server.start() on the first real call.
+    whisper_server = WhisperCppServer(models_dir=_default_whisper_model_dir())
+
     # In-memory adapter state. Single source of truth for what the
     # Electron app sees as "the active LoRA". Boots from the persisted
     # choice; cleared on /api/load-adapter {path:null}; updated to a
@@ -378,7 +435,11 @@ def build_app(
             try:
                 await server.stop()
             finally:
-                bridge.close()
+                try:
+                    if whisper_server.alive:
+                        await whisper_server.stop()
+                finally:
+                    bridge.close()
 
     app = FastAPI(title="MiniCPM Sidecar Gateway", lifespan=lifespan)
     app.add_middleware(
@@ -834,6 +895,37 @@ def build_app(
         bridge.post(state, event=payload.get("event"))
         return {"ok": True}
 
+    # ─── Call Mode (live voice) ──────────────────────────────────────────
+    # A local, peer-to-peer WebRTC connection negotiated over this same
+    # plain HTTP endpoint (Pipecat's SmallWebRTCTransport) — no cloud
+    # transport infrastructure involved. See call_pipeline.py for the
+    # actual STT -> LLM -> TTS pipeline; this is just the signaling route.
+    call_bot = build_call_bot(
+        resolve_llm_endpoint=resolve_llm_endpoint,
+        whisper_server=whisper_server,
+        bridge=bridge,
+    )
+    webrtc_handler = SmallWebRTCRequestHandler()
+
+    @app.post("/api/call/offer")
+    async def call_offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
+        session_id = str(uuid.uuid4())
+
+        async def on_connection(connection: SmallWebRTCConnection):
+            background_tasks.add_task(
+                call_bot,
+                SmallWebRTCRunnerArguments(webrtc_connection=connection, body=request.request_data),
+            )
+
+        return await webrtc_handler.handle_web_request(
+            request=request, webrtc_connection_callback=on_connection
+        )
+
+    @app.patch("/api/call/offer")
+    async def call_ice_candidate(request: SmallWebRTCPatchRequest):
+        await webrtc_handler.handle_patch_request(request)
+        return {"status": "success"}
+
     @app.get("/")
     def index():
         return JSONResponse({
@@ -845,7 +937,7 @@ def build_app(
                 "/api/devices", "/api/set-device", "/api/onboarding",
                 "/api/update-check", "/api/update-apply",
                 "/api/adapters", "/api/load-adapter", "/api/classify",
-                "/api/state",
+                "/api/state", "/api/call/offer",
             ],
         })
 
