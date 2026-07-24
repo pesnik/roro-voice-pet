@@ -1818,6 +1818,13 @@ module.exports = function initMinicpmChat(ctx) {
     bubble.webContents.send("minicpm:cmd-toggle-thinking");
   }
 
+  function toggleCallMode() {
+    // Same shape as toggleThinking() — the renderer owns Call Mode's
+    // connect/disconnect state, we just nudge it.
+    ensureBubble();
+    bubble.webContents.send("minicpm:cmd-toggle-call-mode");
+  }
+
   function shutdown() {
     sidecar.stop();
     if (bubble && !bubble.isDestroyed()) bubble.destroy();
@@ -3030,6 +3037,7 @@ module.exports = function initMinicpmChat(ctx) {
     toggle,
     dismiss,
     toggleThinking,
+    toggleCallMode,
     warmup,
     onStateEvent,
     setNarrationEnabled,

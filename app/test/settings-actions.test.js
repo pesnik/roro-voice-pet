@@ -654,6 +654,7 @@ describe("shortcut commands", () => {
           permissionDeny: () => {},
           toggleChat: () => {},
           toggleThinking: () => {},
+          callMode: () => {},
         },
         getShortcutFailure: (actionId) => failures.get(actionId) || null,
         clearShortcutFailure: (actionId) => failures.delete(actionId),

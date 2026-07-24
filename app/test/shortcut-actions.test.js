@@ -19,12 +19,13 @@ const {
 
 describe("shortcut-actions metadata", () => {
   it("exposes all known shortcut action ids", () => {
-    assert.deepStrictEqual(SHORTCUT_ACTION_IDS, ["togglePet", "permissionAllow", "permissionDeny", "toggleChat", "toggleThinking"]);
+    assert.deepStrictEqual(SHORTCUT_ACTION_IDS, ["togglePet", "permissionAllow", "permissionDeny", "toggleChat", "toggleThinking", "callMode"]);
     assert.strictEqual(SHORTCUT_ACTIONS.togglePet.persistent, true);
     assert.strictEqual(SHORTCUT_ACTIONS.permissionAllow.persistent, false);
     assert.strictEqual(SHORTCUT_ACTIONS.permissionDeny.persistent, false);
     assert.strictEqual(SHORTCUT_ACTIONS.toggleChat.persistent, true);
     assert.strictEqual(SHORTCUT_ACTIONS.toggleThinking.persistent, true);
+    assert.strictEqual(SHORTCUT_ACTIONS.callMode.persistent, true);
   });
 
   it("builds fresh default shortcut maps", () => {
@@ -37,6 +38,7 @@ describe("shortcut-actions metadata", () => {
       permissionDeny: "CommandOrControl+Shift+N",
       toggleChat: "CommandOrControl+Shift+M",
       toggleThinking: "CommandOrControl+Shift+T",
+        callMode: "CommandOrControl+Shift+V",
     });
   });
 });
@@ -209,6 +211,7 @@ describe("normalizeShortcuts", () => {
         permissionDeny: "CommandOrControl+Shift+N",
         toggleChat: "CommandOrControl+Shift+M",
         toggleThinking: "CommandOrControl+Shift+T",
+        callMode: "CommandOrControl+Shift+V",
       }
     );
   });
@@ -226,6 +229,7 @@ describe("normalizeShortcuts", () => {
         permissionDeny: null,
         toggleChat: "CommandOrControl+Shift+M",
         toggleThinking: "CommandOrControl+Shift+T",
+        callMode: "CommandOrControl+Shift+V",
       }
     );
   });
@@ -254,6 +258,7 @@ describe("normalizeShortcuts", () => {
         permissionDeny: "CommandOrControl+Shift+N",
         toggleChat: "CommandOrControl+Shift+M",
         toggleThinking: "CommandOrControl+Shift+T",
+        callMode: "CommandOrControl+Shift+V",
       }
     );
   });

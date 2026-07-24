@@ -282,6 +282,16 @@ const shortcutHandlers = {
       }
     } catch {}
   },
+  callMode: () => {
+    try {
+      if (_minicpmChat && typeof _minicpmChat.isOpen === "function" && !_minicpmChat.isOpen()) {
+        _minicpmChat.toggle();
+      }
+      if (_minicpmChat && typeof _minicpmChat.toggleCallMode === "function") {
+        _minicpmChat.toggleCallMode();
+      }
+    } catch {}
+  },
 };
 // No permission-approval bubble in this app (see src/permission.js removal) —
 // keep a permanently-empty list so the bubble-repositioning / floating-window

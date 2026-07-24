@@ -46,6 +46,9 @@ function refreshStaticUi() {
   if (inputEl) {
     inputEl.placeholder = t("chatAskPlaceholder");
   }
+  if (callToggleBtn) {
+    callToggleBtn.title = t(callActive ? "callEndButtonTitle" : "callButtonTitle");
+  }
 }
 
 // Event listener: open native context menu on right-click. Replaced the
@@ -63,6 +66,7 @@ const SIDECAR_URL = "http://127.0.0.1:18765";
 const bubble = document.getElementById("bubble");
 const content = document.getElementById("content");
 const updPill = document.getElementById("updPill");
+const callToggleBtn = document.getElementById("callToggleBtn");
 
 // ── module state ──
 let phase = "hidden";        // hidden | starting | ask | thinking | speak | error
@@ -73,6 +77,15 @@ let abortCtrl = null;
 let fadeTimer = null;
 let inputEl = null;          // <textarea> while in ask state
 let isBubbleHovered = false; // mouse over the bubble → keep alive
+
+// ── Call Mode (live voice) state ──
+// The Pipecat client itself lives in the preload (window.minicpm.callStart/
+// callEnd/callSetMuted); this renderer only tracks UI state and swaps the
+// bubble content while a call is active. Pet-state pushes (listening/
+// speaking → attention/working) happen server-side in the sidecar's
+// call_pipeline.py, not from here.
+let callActive = false;
+let callMuted = false;
 
 bubble.addEventListener("mouseenter", () => {
   isBubbleHovered = true;
@@ -294,6 +307,109 @@ async function showThinking(label) {
   content.innerHTML = '<div class="thinking-row"><span class="spinner"></span><span>' + escapeHtml(text) + '</span></div>';
   await measureAndShow();
 }
+
+// ── Call Mode (live voice) ──────────────────────────────────────────────
+// The pet itself is the "call UI" — this renders only a minimal status
+// line + mute/end controls in the bubble. Listening/speaking pet-state
+// animation is driven server-side (sidecar's call_pipeline.py posts to
+// the same /state route text chat already uses), not from here.
+function renderCallStatus(statusKey) {
+  content.innerHTML =
+    '<div class="thinking-row call-row"><span class="spinner"></span><span id="call-status-text">' +
+      escapeHtml(t(statusKey)) +
+    '</span></div>' +
+    '<div class="call-controls">' +
+      '<button type="button" id="call-mute-btn" class="' + (callMuted ? "muted-on" : "") + '">' +
+        escapeHtml(t(callMuted ? "callUnmuteButtonTitle" : "callMuteButtonTitle")) +
+      '</button>' +
+      '<button type="button" id="call-end-btn" class="danger">' + escapeHtml(t("callEndButtonTitle")) + '</button>' +
+    '</div>';
+  const muteBtn = document.getElementById("call-mute-btn");
+  if (muteBtn) muteBtn.addEventListener("click", toggleCallMute);
+  const endBtn = document.getElementById("call-end-btn");
+  if (endBtn) endBtn.addEventListener("click", endCall);
+}
+
+function setCallStatusText(key) {
+  const el = document.getElementById("call-status-text");
+  if (el) el.textContent = t(key);
+}
+
+function toggleCallMute() {
+  callMuted = !callMuted;
+  if (window.minicpm && typeof window.minicpm.callSetMuted === "function") {
+    window.minicpm.callSetMuted(callMuted);
+  }
+  setCallStatusText(callMuted ? "callMuted" : "callListening");
+  const muteBtn = document.getElementById("call-mute-btn");
+  if (muteBtn) {
+    muteBtn.classList.toggle("muted-on", callMuted);
+    muteBtn.textContent = t(callMuted ? "callUnmuteButtonTitle" : "callMuteButtonTitle");
+  }
+}
+
+function onCallEvent(name, _payload) {
+  if (!callActive) return;
+  if (callMuted) return; // status line stays "Muted" until the user unmutes
+  if (name === "bot-started-speaking") {
+    setCallStatusText("callSpeaking");
+  } else if (
+    name === "bot-stopped-speaking" ||
+    name === "user-started-speaking" ||
+    name === "user-stopped-speaking"
+  ) {
+    setCallStatusText("callListening");
+  } else if (name === "disconnected") {
+    endCall({ alreadyDisconnected: true });
+  } else if (name === "error") {
+    showToast(t("callError", { error: (_payload && _payload.message) || "unknown" }));
+    endCall({ alreadyDisconnected: true });
+  }
+}
+
+async function startCall() {
+  if (callActive || !sidecarUrl) return;
+  callActive = true;
+  callMuted = false;
+  if (callToggleBtn) {
+    callToggleBtn.classList.add("active");
+    callToggleBtn.title = t("callEndButtonTitle");
+  }
+  renderCallStatus("callConnecting");
+  await measureAndShow();
+  try {
+    await window.minicpm.callStart(sidecarUrl + "/api/call/offer", onCallEvent);
+    if (callActive) setCallStatusText("callListening");
+  } catch (err) {
+    callActive = false;
+    if (callToggleBtn) {
+      callToggleBtn.classList.remove("active");
+      callToggleBtn.title = t("callButtonTitle");
+    }
+    showToast(t("callError", { error: (err && err.message) || String(err) }));
+    await showAsk();
+  }
+}
+
+async function endCall(opts) {
+  const wasActive = callActive;
+  callActive = false;
+  if (callToggleBtn) {
+    callToggleBtn.classList.remove("active");
+    callToggleBtn.title = t("callButtonTitle");
+  }
+  if (!(opts && opts.alreadyDisconnected) && window.minicpm && typeof window.minicpm.callEnd === "function") {
+    try { await window.minicpm.callEnd(); } catch {}
+  }
+  if (wasActive) await showAsk();
+}
+
+function toggleCallMode() {
+  if (callActive) endCall();
+  else startCall();
+}
+
+if (callToggleBtn) callToggleBtn.addEventListener("click", toggleCallMode);
 
 async function clearChatAnchor() {
   if (window.minicpm && window.minicpm.setChatAnchor) {
@@ -1093,6 +1209,9 @@ async function cmdDismiss() {
     try { abortCtrl.abort(); } catch {}
     abortCtrl = null;
   }
+  if (callActive) {
+    await endCall();
+  }
   await hideBubble({ fade: true });
 }
 
@@ -1158,6 +1277,7 @@ if (window.minicpm) {
     thinkingOverride = willEnable;
     showToast(willEnable ? t("chatThinkingOn") : t("chatThinkingOff"));
   });
+  if (window.minicpm.onToggleCallMode) window.minicpm.onToggleCallMode(() => toggleCallMode());
   if (window.minicpm.onUpdateStatus) window.minicpm.onUpdateStatus(updateBadge);
   if (window.minicpm.onUpdateApplying) window.minicpm.onUpdateApplying(showUpdateProgress);
   if (window.minicpm.onNarrate) window.minicpm.onNarrate(showNarration);

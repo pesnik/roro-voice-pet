@@ -643,6 +643,7 @@ describe("prefs.validate", () => {
       permissionDeny: "CommandOrControl+Shift+N",
       toggleChat: "CommandOrControl+Shift+M",
       toggleThinking: "CommandOrControl+Shift+T",
+    callMode: "CommandOrControl+Shift+V",
     });
   });
 
@@ -658,6 +659,7 @@ describe("prefs.validate", () => {
       permissionDeny: "CommandOrControl+Shift+N",
       toggleChat: "CommandOrControl+Shift+M",
       toggleThinking: "CommandOrControl+Shift+T",
+    callMode: "CommandOrControl+Shift+V",
     });
   });
 
@@ -675,6 +677,7 @@ describe("prefs.validate", () => {
       permissionDeny: "CommandOrControl+Shift+N",
       toggleChat: "CommandOrControl+Shift+M",
       toggleThinking: "CommandOrControl+Shift+T",
+    callMode: "CommandOrControl+Shift+V",
     });
   });
 
@@ -692,6 +695,7 @@ describe("prefs.validate", () => {
       permissionDeny: "CommandOrControl+Shift+N",
       toggleChat: "CommandOrControl+Shift+M",
       toggleThinking: "CommandOrControl+Shift+T",
+    callMode: "CommandOrControl+Shift+V",
     });
   });
 

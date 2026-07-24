@@ -35,6 +35,11 @@
       defaultAccelerator: "CommandOrControl+Shift+T",
       labelKey: "shortcutLabelToggleThinking",
     }),
+    callMode: Object.freeze({
+      persistent: true,
+      defaultAccelerator: "CommandOrControl+Shift+V",
+      labelKey: "shortcutLabelCallMode",
+    }),
   });
 
   const SHORTCUT_ACTION_IDS = Object.freeze(Object.keys(SHORTCUT_ACTIONS));

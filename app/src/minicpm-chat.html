@@ -302,6 +302,46 @@
     border-radius: 2px;
   }
 
+  /* Call Mode toggle — small icon button, mirrors .upd-pill's corner
+     placement but on the opposite side so the two never collide. */
+  .call-toggle-btn {
+    position: absolute;
+    top: 6px; left: 8px;
+    z-index: 10;
+    width: 20px; height: 20px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; line-height: 1;
+    color: var(--accent);
+    background: rgba(155,140,255,0.10);
+    border: 1px solid rgba(155,140,255,0.35);
+    border-radius: 999px;
+    cursor: pointer;
+    user-select: none;
+    -webkit-app-region: no-drag;
+  }
+  .call-toggle-btn:hover { background: rgba(155,140,255,0.18); }
+  .call-toggle-btn.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+
+  /* — STATE: call (Call Mode active) — reuses .thinking-row's spinner
+     look for the status line; controls sit below it. */
+  .call-controls {
+    display: flex; justify-content: center; gap: 10px;
+    margin-top: 8px;
+  }
+  .call-controls button {
+    -webkit-app-region: no-drag;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .call-controls button:hover { background: rgba(127,127,127,0.10); }
+  .call-controls button.danger { color: var(--danger, #ff6b6b); border-color: var(--danger, #ff6b6b); }
+  .call-controls button.muted-on { color: var(--accent); border-color: var(--accent); }
+
   .err-text { color: var(--danger, #ff6b6b); font-size: 11px; }
   .err-text pre {
     margin-top: 6px; padding: 6px; background: rgba(255,255,255,0.04);
@@ -318,6 +358,7 @@
   <div class="bubble" id="bubble" data-side="right">
     <div class="tail"></div>
     <div class="upd-pill" id="updPill"></div>
+    <button type="button" class="call-toggle-btn" id="callToggleBtn" title="">&#9742;</button>
     <div id="content"></div>
   </div>
 </div>
