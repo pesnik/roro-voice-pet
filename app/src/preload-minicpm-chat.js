@@ -66,6 +66,13 @@ function _buildCallClient(onEvent) {
       onBotStoppedSpeaking: () => emit("bot-stopped-speaking"),
       onUserStartedSpeaking: () => emit("user-started-speaking"),
       onUserStoppedSpeaking: () => emit("user-stopped-speaking"),
+      // pipecat's RTVIObserver sends these by default (enable_rtvi=True,
+      // no server-side change needed) — user's speech (interim + final)
+      // and the bot's reply, sentence-aggregated. Forwarded so the
+      // renderer can show a live transcript instead of the call being a
+      // black box with nothing to show for it once it ends.
+      onUserTranscript: (data) => emit("user-transcript", { text: data && data.text, final: !!(data && data.final) }),
+      onBotTranscript: (data) => emit("bot-transcript", { text: data && data.text }),
       onDisconnected: () => { _detachBotAudioTrack(); emit("disconnected"); },
       onError: (message) => emit("error", { message: String((message && message.data) || message) }),
       onTrackStarted: (track) => _attachBotAudioTrack(track),

@@ -107,14 +107,6 @@
     -webkit-app-region: no-drag;
     display: block;
   }
-  /* .call-toggle-btn is an always-visible absolute-positioned overlay in
-     the bubble's top-left corner (see below) — #ask-input renders flush
-     with that same corner in both ask layouts (the compact first-open
-     pill has no wrapper at all), so without this it sits directly under
-     the icon and the placeholder text/icon visually overlap. */
-  #ask-input {
-    padding-left: 20px;
-  }
   textarea::placeholder { color: var(--muted); }
 
   /* — Continuous-chat layout (size follows content; bubble grows smoothly) — */
@@ -310,6 +302,17 @@
     border-radius: 2px;
   }
 
+  /* Unlike .upd-pill (top-right, hidden unless an update is actually
+     available), .call-toggle-btn below is always visible, so every
+     state's rendered content — ask text, call status/transcript,
+     thinking, narration, errors, all of it — needs to clear its corner
+     rather than patching one colliding class at a time as each is found.
+     naturalAskWidth()/naturalDisplayWidth()'s width math already budgets
+     for this (see their +20 comments). */
+  #content {
+    padding-left: 20px;
+  }
+
   /* Call Mode toggle — small icon button, mirrors .upd-pill's corner
      placement but on the opposite side so the two never collide. */
   .call-toggle-btn {
@@ -332,6 +335,28 @@
 
   /* — STATE: call (Call Mode active) — reuses .thinking-row's spinner
      look for the status line; controls sit below it. */
+  /* Live transcript above the status line — capped and internally
+     scrolled (like .last-reply-region) so a long call doesn't grow the
+     bubble without bound; empty (no min-height) until the first line
+     arrives so a fresh call doesn't show a blank gap. */
+  .call-transcript {
+    max-height: 160px;
+    overflow-y: auto;
+    font-size: 12.5px;
+    line-height: 1.45;
+    user-select: text;
+    -webkit-app-region: no-drag;
+  }
+  .call-transcript:not(:empty) { margin-bottom: 8px; padding-bottom: 6px;
+    border-bottom: 1px solid var(--border); }
+  .call-transcript::-webkit-scrollbar { width: 4px; }
+  .call-transcript::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .call-transcript-line {
+    white-space: pre-wrap; word-wrap: break-word;
+    margin: 3px 0;
+  }
+  .call-transcript-user { color: var(--muted); }
+  .call-transcript-assistant { color: var(--text); }
   .call-controls {
     display: flex; justify-content: center; gap: 10px;
     margin-top: 8px;

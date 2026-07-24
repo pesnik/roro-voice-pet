@@ -86,6 +86,13 @@ let isBubbleHovered = false; // mouse over the bubble → keep alive
 // call_pipeline.py, not from here.
 let callActive = false;
 let callMuted = false;
+// Running transcript for the current call — { role: "user" | "assistant",
+// content }[], reset at the start of each call. Populated from the RTVI
+// user-transcription/bot-transcription messages that pipecat's
+// RTVIObserver already sends by default (no server-side change needed);
+// rendered live during the call and handed to showAsk() as the "last
+// reply" when the call ends, so the conversation doesn't just vanish.
+let callTranscript = [];
 
 bubble.addEventListener("mouseenter", () => {
   isBubbleHovered = true;
@@ -330,6 +337,7 @@ async function showThinking(label) {
 // the same /state route text chat already uses), not from here.
 function renderCallStatus(statusKey) {
   content.innerHTML =
+    '<div class="call-transcript" id="call-transcript"></div>' +
     '<div class="thinking-row call-row"><span class="spinner"></span><span id="call-status-text">' +
       escapeHtml(t(statusKey)) +
     '</span></div>' +
@@ -343,11 +351,38 @@ function renderCallStatus(statusKey) {
   if (muteBtn) muteBtn.addEventListener("click", toggleCallMute);
   const endBtn = document.getElementById("call-end-btn");
   if (endBtn) endBtn.addEventListener("click", endCall);
+  renderCallTranscript();
 }
 
 function setCallStatusText(key) {
   const el = document.getElementById("call-status-text");
   if (el) el.textContent = t(key);
+}
+
+// Rebuilds just the transcript list (not the whole call UI, which would
+// wipe the status text / drop button listeners) and keeps it scrolled to
+// the newest line. Called on every user-transcript/bot-transcript event.
+function renderCallTranscript() {
+  const el = document.getElementById("call-transcript");
+  if (!el) return;
+  el.innerHTML = callTranscript.map((turn) =>
+    '<div class="call-transcript-line call-transcript-' + turn.role + '">' +
+      escapeHtml(turn.content) +
+    '</div>'
+  ).join("");
+  el.scrollTop = el.scrollHeight;
+  void measureAndShow({ animate: false });
+}
+
+// Plain-text rendering of the call transcript for reuse as showAsk()'s
+// "last reply" once the call ends — same {role, content} shape as `history`
+// but intentionally kept separate from it: call turns are never sent back
+// to the LLM as prior context (each call gets its own fresh server-side
+// LLMContext), this is display-only.
+function formatCallTranscript() {
+  return callTranscript.map((turn) =>
+    (turn.role === "user" ? "› " : "") + turn.content
+  ).join("\n\n");
 }
 
 function toggleCallMute() {
@@ -365,6 +400,28 @@ function toggleCallMute() {
 
 function onCallEvent(name, _payload) {
   if (!callActive) return;
+  // Transcript events update regardless of mute — muting only stops
+  // sending mic audio, the bot can still be mid-reply, and the whole
+  // point of the transcript is a full record of the call.
+  if (name === "user-transcript") {
+    if (_payload && _payload.final && _payload.text && _payload.text.trim()) {
+      callTranscript.push({ role: "user", content: _payload.text.trim() });
+      renderCallTranscript();
+    }
+    return;
+  }
+  if (name === "bot-transcript") {
+    const text = _payload && _payload.text;
+    if (!text) return;
+    const last = callTranscript[callTranscript.length - 1];
+    if (last && last.role === "assistant") {
+      last.content += (last.content.endsWith(" ") ? "" : " ") + text;
+    } else {
+      callTranscript.push({ role: "assistant", content: text });
+    }
+    renderCallTranscript();
+    return;
+  }
   if (callMuted) return; // status line stays "Muted" until the user unmutes
   if (name === "bot-started-speaking") {
     setCallStatusText("callSpeaking");
@@ -395,6 +452,7 @@ async function startCall() {
   }
   callActive = true;
   callMuted = false;
+  callTranscript = [];
   // The 25s ask-idle-timer (armAskIdleTimer) only checks `phase === "ask"`
   // before hiding the bubble — since nothing here used to move phase off
   // "ask", a timer armed right as the call started (e.g. by the textarea's
@@ -511,7 +569,12 @@ async function endCall(opts) {
   if (!(opts && opts.alreadyDisconnected) && window.minicpm && typeof window.minicpm.callEnd === "function") {
     try { await window.minicpm.callEnd(); } catch {}
   }
-  if (wasActive) await showAsk();
+  // Reuse the existing "last reply" display (the same one text chat uses)
+  // so the call's transcript doesn't just disappear when the call ends —
+  // it's the whole reason the transcript was rendered live in the first
+  // place. Left in place (not cleared) so it's still there if the bubble
+  // is reopened before the next chat/call overwrites it.
+  if (wasActive) await showAsk(callTranscript.length ? formatCallTranscript() : undefined);
 }
 
 function toggleCallMode() {
@@ -683,7 +746,7 @@ function naturalAskWidth(text) {
   widthMeasurer.style.font = window.getComputedStyle(content).font;
   widthMeasurer.textContent = sample;
   const textW = widthMeasurer.offsetWidth;
-  // +32 for the bubble's own horizontal padding, +20 to match #ask-input's
+  // +32 for the bubble's own horizontal padding, +20 to match #content's
   // padding-left (reserved so text clears the always-visible call-toggle
   // icon in the top-left corner) — without it this pill sizes itself as if
   // the textarea had the full width, and the text clips/wraps early.
@@ -693,8 +756,11 @@ function naturalAskWidth(text) {
 // For fixed-text panels (command replies, errors, narration, speak phase, …)
 // the bubble should be wide enough to read comfortably without breaking
 // short prompts onto multiple lines. Measures the longest line of `text`
-// and clamps to a comfortable range.
-function naturalDisplayWidth(text, { min = 220, max = 320, padding = 32 } = {}) {
+// and clamps to a comfortable range. Default padding is the bubble's own
+// 32px horizontal padding plus 20px for #content's padding-left (see
+// naturalAskWidth above); callers that pass their own `padding` already
+// bake in that +20 too.
+function naturalDisplayWidth(text, { min = 220, max = 320, padding = 52 } = {}) {
   const lines = String(text || "").split(/\r?\n/);
   widthMeasurer.style.font = window.getComputedStyle(content).font;
   let widest = 0;
@@ -720,7 +786,7 @@ async function showCommandReply(cmd) {
     </div>`;
   // +30 padding for the icon column so multi-line replies don't wrap
   // tighter than the icon alignment.
-  await measureAndShow({ animate: true, width: naturalDisplayWidth(text, { min: 240, padding: 56 }) });
+  await measureAndShow({ animate: true, width: naturalDisplayWidth(text, { min: 240, padding: 76 }) });
   const dwell = clamp(2800 + text.length * 100, 3500, 11000);
   fadeTimer = setTimeout(() => {
     fadeTimer = null;
@@ -739,7 +805,7 @@ async function showCommandProgress(text) {
       <span class="spinner" style="margin-top:3px;"></span>
       <span style="font-size:13px; color:var(--text); white-space:pre-wrap; word-wrap:break-word;">${escaped}</span>
     </div>`;
-  await measureAndShow({ animate: true, width: naturalDisplayWidth(text || "", { min: 220, padding: 56 }) });
+  await measureAndShow({ animate: true, width: naturalDisplayWidth(text || "", { min: 220, padding: 76 }) });
 }
 
 // ── Intent classification: two-stage hybrid ──
@@ -1433,7 +1499,7 @@ async function enterEditMode() {
       '<span style="font-size:14px; line-height:1; color:var(--accent); padding-top:1px;">📍</span>' +
       '<span style="font-size:13px; color:var(--text); white-space:pre-wrap;">' + escapeHtml(hint) + '</span>' +
     '</div>';
-  await measureAndShow({ animate: true, width: naturalDisplayWidth(hintShort, { min: 240, padding: 56 }) });
+  await measureAndShow({ animate: true, width: naturalDisplayWidth(hintShort, { min: 240, padding: 76 }) });
 }
 
 function exitEditMode() {
@@ -1459,7 +1525,7 @@ async function showNarration({ text, kind }) {
       <span style="font-size:13px; line-height:1; color:${accent}; padding-top:1px;">🐾</span>
       <span style="font-size:13px; color:var(--text); white-space:pre-wrap; word-wrap:break-word;">${escaped}</span>
     </div>`;
-  await measureAndShow({ animate: true, width: naturalDisplayWidth(text, { min: 220, padding: 56 }) });
+  await measureAndShow({ animate: true, width: naturalDisplayWidth(text, { min: 220, padding: 76 }) });
 }
 
 // ── Updater UI ────────────────────────────────────────────────────────────
