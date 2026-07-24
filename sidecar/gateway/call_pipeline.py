@@ -121,6 +121,13 @@ def _build_stt(cfg: STTConfig, whisper_server: WhisperCppServer):
     return WhisperCppSTTService(server=whisper_server)
 
 
+# Kokoro has no built-in default — KokoroTTSService raises "Kokoro TTS
+# voice must be specified" at first synthesis if none is set. af_heart is
+# one of Kokoro's standard bundled voices (natural-sounding American
+# female); TTS_VOICE overrides it same as it does for the openai backend.
+DEFAULT_KOKORO_VOICE = "af_heart"
+
+
 def _build_tts(cfg: TTSConfig):
     if cfg.backend == "openai":
         return OpenAITTSService(
@@ -130,7 +137,7 @@ def _build_tts(cfg: TTSConfig):
             if (cfg.model or cfg.voice)
             else None,
         )
-    return KokoroTTSService()
+    return KokoroTTSService(settings=KokoroTTSService.Settings(voice=cfg.voice or DEFAULT_KOKORO_VOICE))
 
 
 def build_call_bot(
@@ -162,6 +169,7 @@ def build_call_bot(
 
     async def run_bot(runner_args: RunnerArguments) -> None:
         log = get_logger()
+        log.info("call: pipeline build starting")
         transport = await create_transport(
             runner_args,
             {
@@ -172,13 +180,19 @@ def build_call_bot(
             },
         )
 
+        stt_cfg = resolve_stt_config()
+        tts_cfg = resolve_tts_config()
         endpoint = resolve_llm_endpoint()
-        stt = _build_stt(resolve_stt_config(), whisper_server)
-        tts = _build_tts(resolve_tts_config())
+        stt = _build_stt(stt_cfg, whisper_server)
+        tts = _build_tts(tts_cfg)
         llm = OpenAILLMService(
             base_url=endpoint.base_url,
             api_key=endpoint.api_key,
             model=endpoint.model,
+        )
+        log.info(
+            "call: services built (stt=%s tts=%s llm=%s)",
+            stt_cfg.backend, tts_cfg.backend, endpoint.model,
         )
 
         messages = [{"role": "system", "content": system_prompt}] if system_prompt else []
@@ -203,6 +217,10 @@ def build_call_bot(
 
         worker = PipelineWorker(pipeline, params=PipelineParams(enable_metrics=False))
 
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(_transport, _client):
+            log.info("call: WebRTC peer connection established")
+
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(_transport, _client):
             log.info("call: client disconnected")
@@ -212,9 +230,14 @@ def build_call_bot(
         bridge.post("attention", event="CallStarted")
         runner = WorkerRunner(handle_sigint=False)
         await runner.add_workers(worker)
+        log.info("call: pipeline running, awaiting connection")
         try:
             await runner.run()
+        except Exception:
+            log.exception("call: pipeline crashed")
+            raise
         finally:
+            log.info("call: pipeline ended")
             bridge.post("idle", event="CallEnded")
 
     return run_bot

@@ -981,16 +981,20 @@ def build_app(
     @app.post("/api/call/offer")
     async def call_offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
         session_id = str(uuid.uuid4())
+        log.info("call: offer received, session=%s", session_id)
 
         async def on_connection(connection: SmallWebRTCConnection):
+            log.info("call: SmallWebRTCConnection created, session=%s", session_id)
             background_tasks.add_task(
                 call_bot,
                 SmallWebRTCRunnerArguments(webrtc_connection=connection, body=request.request_data),
             )
 
-        return await webrtc_handler.handle_web_request(
+        answer = await webrtc_handler.handle_web_request(
             request=request, webrtc_connection_callback=on_connection
         )
+        log.info("call: answer sent, session=%s", session_id)
+        return answer
 
     @app.patch("/api/call/offer")
     async def call_ice_candidate(request: SmallWebRTCPatchRequest):

@@ -59,10 +59,49 @@ def test_build_stt_openai_backend_uses_configured_endpoint(monkeypatch):
     assert captured["settings"].model == "whisper-1"
 
 
-def test_build_tts_defaults_to_local_kokoro(monkeypatch):
-    monkeypatch.setattr(call_pipeline, "KokoroTTSService", lambda: "kokoro-instance")
+def test_build_tts_defaults_to_local_kokoro_with_a_default_voice(monkeypatch):
+    captured = {}
 
-    assert call_pipeline._build_tts(TTSConfig()) == "kokoro-instance"
+    class _FakeSettings:
+        def __init__(self, *, voice):
+            self.voice = voice
+
+    class _FakeKokoroTTSService:
+        Settings = _FakeSettings
+
+        def __init__(self, *, settings):
+            captured["settings"] = settings
+
+    monkeypatch.setattr(call_pipeline, "KokoroTTSService", _FakeKokoroTTSService)
+
+    tts = call_pipeline._build_tts(TTSConfig())
+
+    # Regression test: KokoroTTSService raises "Kokoro TTS voice must be
+    # specified" at first synthesis if none is set — it has no built-in
+    # default, unlike OpenAI's TTS. A bare KokoroTTSService() call broke
+    # every local-backend call at the first spoken sentence.
+    assert isinstance(tts, _FakeKokoroTTSService)
+    assert captured["settings"].voice == call_pipeline.DEFAULT_KOKORO_VOICE
+
+
+def test_build_tts_local_kokoro_honours_tts_voice_override(monkeypatch):
+    captured = {}
+
+    class _FakeSettings:
+        def __init__(self, *, voice):
+            self.voice = voice
+
+    class _FakeKokoroTTSService:
+        Settings = _FakeSettings
+
+        def __init__(self, *, settings):
+            captured["settings"] = settings
+
+    monkeypatch.setattr(call_pipeline, "KokoroTTSService", _FakeKokoroTTSService)
+
+    call_pipeline._build_tts(TTSConfig(voice="af_sky"))
+
+    assert captured["settings"].voice == "af_sky"
 
 
 def test_build_tts_openai_backend_uses_configured_voice(monkeypatch):
