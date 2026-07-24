@@ -1729,6 +1729,18 @@ module.exports = function initMinicpmChat(ctx) {
         preload: path.join(__dirname, "preload-minicpm-chat.js"),
         contextIsolation: true,
         nodeIntegration: false,
+        // Electron's default sandbox:true blocks preload scripts from
+        // require()-ing arbitrary node_modules packages (only a limited
+        // built-in allowlist is available there) — broke this preload
+        // outright the moment it started requiring @pipecat-ai/client-js
+        // for Call Mode, silently: the whole script aborts before
+        // contextBridge.exposeInMainWorld runs, so window.minicpm ends up
+        // undefined and every call through it (including plain chat)
+        // hangs/throws uncaught. contextIsolation stays on as the real
+        // boundary between this window's page script and Node — sandbox
+        // is safe to drop here since this window only ever loads its own
+        // bundled minicpm-chat.html, never remote/untrusted content.
+        sandbox: false,
       },
     });
 
