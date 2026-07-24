@@ -386,10 +386,21 @@ async function startCall() {
   }
   renderCallStatus("callConnecting");
   await measureAndShow();
+  // The very first call on a fresh install downloads the local STT/TTS
+  // models (whisper.cpp + Kokoro, ~200-400MB total) before the pipeline
+  // can come up — that can take well past a normal "connecting" delay.
+  // No real progress signal crosses the WebRTC offer/answer handshake, so
+  // this is a client-side heuristic: still connecting after a few seconds
+  // almost certainly means a download is in progress, not a stall.
+  const downloadHintTimer = setTimeout(() => {
+    if (callActive) setCallStatusText("callDownloadingModels");
+  }, 4000);
   try {
     await window.minicpm.callStart(sidecarUrl + "/api/call/offer", onCallEvent);
+    clearTimeout(downloadHintTimer);
     if (callActive) setCallStatusText("callListening");
   } catch (err) {
+    clearTimeout(downloadHintTimer);
     callActive = false;
     if (callToggleBtn) {
       callToggleBtn.classList.remove("active");

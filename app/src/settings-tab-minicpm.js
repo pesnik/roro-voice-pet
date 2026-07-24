@@ -445,6 +445,40 @@
     box.appendChild(section);
   }
 
+  // Backend choice for Call Mode is the *same* chat-backend selector in
+  // renderBehaviorSection above, not a separate setting — this section
+  // only surfaces whether the local STT/TTS assets Call Mode needs are
+  // already downloaded (both fetch lazily on first call, so there's
+  // nothing to trigger from here, just status to show).
+  async function renderCallSection(box, ctx) {
+    box.innerHTML = "";
+    let status = null;
+    try { status = await window.minicpmSettings.getCallStatus(); } catch {}
+    const whisperReady = !!(status && status.whisper && status.whisper.ready);
+    const kokoroReady = !!(status && status.kokoro && status.kokoro.ready);
+
+    box.appendChild(sectionTitle(t("minicpmSectionCall")));
+    const section = helpers.buildSection("", []);
+    const rows = section.querySelector(".section-rows");
+
+    for (const [labelKey, ready] of [
+      ["minicpmRowCallStt", whisperReady],
+      ["minicpmRowCallTts", kokoroReady],
+    ]) {
+      const row = el("div", { className: "row minicpm-info-row" });
+      const text = el("div", { className: "row-text" });
+      text.appendChild(el("span", { className: "row-label" }, t(labelKey)));
+      row.appendChild(text);
+      row.appendChild(el(
+        "div",
+        { className: "row-control minicpm-info-value" },
+        t(ready ? "minicpmCallModelReady" : "minicpmCallModelNotReady"),
+      ));
+      rows.appendChild(row);
+    }
+    box.appendChild(section);
+  }
+
   function renderModelSection(box, ctx) {
     box.innerHTML = "";
     const snap = ctx.healthSnapshot || {};
@@ -967,6 +1001,7 @@
     await probeHealth(ctx);
     syncStatusPill(ctx);
     await renderBehaviorSection(ctx.behaviorBox, ctx);
+    await renderCallSection(ctx.callBox, ctx);
     renderModelSection(ctx.modelBox, ctx);
     await renderAdapterSection(ctx.adapterBox, ctx);
     renderAdvancedSection(ctx.advancedBox, ctx);
@@ -1011,6 +1046,7 @@
     const ctx = {
       headerBox: el("div", {}),
       behaviorBox: el("div", { className: "minicpm-section-box" }),
+      callBox: el("div", { className: "minicpm-section-box" }),
       modelBox: el("div", { className: "minicpm-section-box" }),
       adapterBox: el("div", { className: "minicpm-section-box" }),
       advancedBox: el("div", { className: "minicpm-section-box" }),
@@ -1045,6 +1081,7 @@
 
     parent.appendChild(ctx.headerBox);
     parent.appendChild(ctx.behaviorBox);
+    parent.appendChild(ctx.callBox);
     parent.appendChild(ctx.modelBox);
     parent.appendChild(ctx.adapterBox);
     parent.appendChild(ctx.advancedBox);

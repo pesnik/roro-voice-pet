@@ -42,6 +42,7 @@ from .openrouter_client import OpenRouterClient
 from .think_filter import ThinkBlockFilter
 from .updater import DEFAULT_SOURCE as DEFAULT_UPDATE_SOURCE
 from .updater import ModelUpdater
+from . import whisper_cpp_stt
 from .whisper_cpp_stt import WhisperCppServer
 
 
@@ -516,6 +517,28 @@ def build_app(
             "startup_error": startup_error,
         }
 
+    @app.get("/api/call/status")
+    def call_status():
+        """Whether Call Mode's local STT/TTS assets are already downloaded —
+        powers the Settings → Call section so users see a real status
+        instead of guessing why the first call is slow. Both engines
+        download lazily on first use (whisper_cpp_stt.ensure_whisper_model,
+        Pipecat's own KokoroTTSService), so this is a pure filesystem check,
+        not a trigger."""
+        whisper_path = _default_whisper_model_dir() / whisper_cpp_stt.DEFAULT_MODEL_FILENAME
+        kokoro_dir = Path.home() / ".cache" / "pipecat" / "kokoro-onnx"
+        return {
+            "whisper": {
+                "ready": whisper_path.is_file(),
+                "path": str(whisper_path),
+            },
+            "kokoro": {
+                "ready": (kokoro_dir / "kokoro-v1.0.onnx").is_file()
+                and (kokoro_dir / "voices-v1.0.bin").is_file(),
+                "path": str(kokoro_dir),
+            },
+        }
+
     @app.get("/api/devices")
     def list_devices():
         if is_openrouter:
@@ -937,7 +960,7 @@ def build_app(
                 "/api/devices", "/api/set-device", "/api/onboarding",
                 "/api/update-check", "/api/update-apply",
                 "/api/adapters", "/api/load-adapter", "/api/classify",
-                "/api/state", "/api/call/offer",
+                "/api/state", "/api/call/offer", "/api/call/status",
             ],
         })
 

@@ -149,6 +149,7 @@ contextBridge.exposeInMainWorld("settingsAPI", {
 // ── MiniCPM settings tab API ──
 contextBridge.exposeInMainWorld("minicpmSettings", {
   getStatus: () => ipcRenderer.invoke("minicpm-settings:get-status"),
+  getCallStatus: () => ipcRenderer.invoke("minicpm-settings:get-call-status"),
   listAdapters: () => ipcRenderer.invoke("minicpm-settings:list-adapters"),
   loadAdapter: (path) => ipcRenderer.invoke("minicpm-settings:load-adapter", { path }),
   checkUpdate: () => ipcRenderer.invoke("minicpm-settings:check-update"),

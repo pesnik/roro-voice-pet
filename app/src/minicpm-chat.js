@@ -2392,6 +2392,13 @@ module.exports = function initMinicpmChat(ctx) {
         narration: narrationEnabled,
       };
     },
+    // Powers Settings → Call: whether Call Mode's local STT/TTS models
+    // have already been downloaded (both engines fetch lazily on first
+    // use — this is a pure filesystem check, not a trigger).
+    "minicpm-settings:get-call-status": async () => {
+      const r = await httpJson("GET", `${sidecar.baseUrl()}/api/call/status`, null, 3000).catch(() => null);
+      return r && r.json ? r.json : { whisper: { ready: false }, kokoro: { ready: false } };
+    },
     "minicpm-settings:list-adapters": async () => {
       // Gateway is the source of truth for the *physical* adapter set
       // (which files exist, persona slug, current active). The manifest
