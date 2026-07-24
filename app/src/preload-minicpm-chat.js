@@ -56,6 +56,10 @@ contextBridge.exposeInMainWorld("minicpm", {
   // pipeline. Pass `null` to unload.
   loadAdapter: (pathOrNull) => ipcRenderer.invoke("minicpm-settings:load-adapter", { path: pathOrNull }),
 
+  // Proactive macOS mic-permission check — call before callStart() so a
+  // denial shows a friendly message instead of a silent connect failure.
+  ensureMicAccess: () => ipcRenderer.invoke("minicpm:ensure-mic-access"),
+
   // Call Mode (live voice) — offerUrl is the sidecar's POST /api/call/offer
   // endpoint. onEvent(name, payload) receives: bot-started-speaking,
   // bot-stopped-speaking, user-started-speaking, user-stopped-speaking,

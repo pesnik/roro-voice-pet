@@ -25,7 +25,7 @@
 // has no torch / transformers / peft dependency and ships as a single
 // binary per platform alongside llama-server.
 
-const { BrowserWindow, ipcMain, screen, shell, Menu, app } = require("electron");
+const { BrowserWindow, ipcMain, screen, shell, Menu, app, systemPreferences } = require("electron");
 const { spawn, execFile } = require("child_process");
 const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
@@ -2257,6 +2257,26 @@ module.exports = function initMinicpmChat(ctx) {
         return { ok: true, status: r.status, url: sidecar.baseUrl() };
       } catch (err) {
         return { ok: false, error: localizeError(err) };
+      }
+    },
+    // Call Mode's proactive mic-permission check. macOS gates getUserMedia
+    // behind a system-level grant that Chromium's own permission prompt
+    // doesn't surface the same way desktop apps expect — asking explicitly
+    // here (once, before the first call) lets the renderer show a friendly
+    // "mic access denied" message instead of a silent WebRTC connect
+    // failure. No-op (always ok) on Windows/Linux, where the
+    // setPermissionRequestHandler wired in main.js is the only gate.
+    "minicpm:ensure-mic-access": async () => {
+      if (process.platform !== "darwin") return { ok: true };
+      try {
+        const status = systemPreferences.getMediaAccessStatus("microphone");
+        if (status === "granted") return { ok: true };
+        const granted = await systemPreferences.askForMediaAccess("microphone");
+        return { ok: granted };
+      } catch (err) {
+        // Older Electron / unsupported platform — fail open rather than
+        // block Call Mode on a permission-check bug.
+        return { ok: true, warning: String(err && err.message || err) };
       }
     },
     "minicpm:get-i18n": async () => {

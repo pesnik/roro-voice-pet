@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, ipcMain, globalShortcut, nativeTheme, dialog, shell, nativeImage, powerSaveBlocker, powerMonitor, clipboard } = require("electron");
+const { app, BrowserWindow, screen, ipcMain, globalShortcut, nativeTheme, dialog, shell, nativeImage, powerSaveBlocker, powerMonitor, clipboard, session, systemPreferences } = require("electron");
 // ── Linux/Wayland: relaunch under XWayland so the pet is draggable (issue #441) ──
 // Native Wayland ignores client-side window positioning and blocks global cursor
 // queries, so the pet spawns centered, can't be dragged, and has no tracking;
@@ -2125,6 +2125,16 @@ if (!gotTheLock) {
   }
 
   app.whenReady().then(() => {
+    // Call Mode needs mic access; Electron denies all permission requests
+    // by default. Scope this to the app's default session (the chat bubble
+    // window doesn't use a custom partition) rather than granting globally
+    // via some other mechanism, and only allow "media" (getUserMedia) —
+    // no camera/screen capture is ever requested by this app.
+    session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+      callback(permission === "media");
+    });
+    session.defaultSession.setPermissionCheckHandler((_webContents, permission) => permission === "media");
+
     // macOS: override the dock icon with a version padded to the macOS icon
     // grid (~80.5% of the canvas, ~100px transparent margin per side) so the
     // Dock tile matches neighbor apps. The build-time icon.png sits ~72.6%

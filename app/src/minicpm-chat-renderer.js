@@ -369,6 +369,15 @@ function onCallEvent(name, _payload) {
 
 async function startCall() {
   if (callActive || !sidecarUrl) return;
+  if (window.minicpm && typeof window.minicpm.ensureMicAccess === "function") {
+    try {
+      const access = await window.minicpm.ensureMicAccess();
+      if (access && access.ok === false) {
+        showToast(t("callMicDenied"));
+        return;
+      }
+    } catch {}
+  }
   callActive = true;
   callMuted = false;
   if (callToggleBtn) {
