@@ -69,7 +69,7 @@ def test_build_tts_defaults_to_local_kokoro_with_a_default_voice(monkeypatch):
     class _FakeKokoroTTSService:
         Settings = _FakeSettings
 
-        def __init__(self, *, settings):
+        def __init__(self, *, settings, **kwargs):
             captured["settings"] = settings
 
     monkeypatch.setattr(call_pipeline, "KokoroTTSService", _FakeKokoroTTSService)
@@ -94,7 +94,7 @@ def test_build_tts_local_kokoro_honours_tts_voice_override(monkeypatch):
     class _FakeKokoroTTSService:
         Settings = _FakeSettings
 
-        def __init__(self, *, settings):
+        def __init__(self, *, settings, **kwargs):
             captured["settings"] = settings
 
     monkeypatch.setattr(call_pipeline, "KokoroTTSService", _FakeKokoroTTSService)
@@ -102,6 +102,53 @@ def test_build_tts_local_kokoro_honours_tts_voice_override(monkeypatch):
     call_pipeline._build_tts(TTSConfig(voice="af_sky"))
 
     assert captured["settings"].voice == "af_sky"
+
+
+def test_voice_formatter_strips_markdown_and_emoji():
+    import asyncio
+
+    result = asyncio.run(
+        call_pipeline._VOICE_FORMATTER("**Hey!** 😊 Here's a list:\n- one\n- two", "*")
+    )
+
+    assert "*" not in result
+    assert "😊" not in result
+    # Regression test: an LLM writing Markdown/emoji for typed chat reads
+    # exactly as awkward spoken aloud ("asterisk asterisk", a spelled-out
+    # emoji description) as it looks natural on screen — this is the
+    # deterministic half of the fix (the other half is the call-mode
+    # system prompt asking the model not to write that way at all).
+    assert "Hey!" in result
+
+
+def test_build_tts_wires_voice_formatter_for_both_backends(monkeypatch):
+    kokoro_kwargs = {}
+    openai_kwargs = {}
+
+    class _FakeSettings:
+        def __init__(self, **kwargs):
+            pass
+
+    class _FakeKokoroTTSService:
+        Settings = _FakeSettings
+
+        def __init__(self, **kwargs):
+            kokoro_kwargs.update(kwargs)
+
+    class _FakeOpenAITTSService:
+        Settings = _FakeSettings
+
+        def __init__(self, **kwargs):
+            openai_kwargs.update(kwargs)
+
+    monkeypatch.setattr(call_pipeline, "KokoroTTSService", _FakeKokoroTTSService)
+    monkeypatch.setattr(call_pipeline, "OpenAITTSService", _FakeOpenAITTSService)
+
+    call_pipeline._build_tts(TTSConfig(backend="local"))
+    call_pipeline._build_tts(TTSConfig(backend="openai"))
+
+    assert kokoro_kwargs["text_transforms"] == [("*", call_pipeline._VOICE_FORMATTER)]
+    assert openai_kwargs["text_transforms"] == [("*", call_pipeline._VOICE_FORMATTER)]
 
 
 def test_build_tts_openai_backend_uses_configured_voice(monkeypatch):
@@ -115,7 +162,7 @@ def test_build_tts_openai_backend_uses_configured_voice(monkeypatch):
     class _FakeOpenAITTSService:
         Settings = _FakeSettings
 
-        def __init__(self, *, api_key, base_url, settings):
+        def __init__(self, *, api_key, base_url, settings, **kwargs):
             captured["api_key"] = api_key
             captured["base_url"] = base_url
             captured["settings"] = settings

@@ -40,6 +40,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.services.openai.tts import OpenAITTSService
 from pipecat.transports.base_transport import TransportParams
+from pipecat.utils.text.transforms.voice_formatter import VoiceFormatter
 from pipecat.workers.runner import WorkerRunner
 
 from .clawd_state import ClawdBridge
@@ -127,6 +128,29 @@ def _build_stt(cfg: STTConfig, whisper_server: WhisperCppServer):
 # female); TTS_VOICE overrides it same as it does for the openai backend.
 DEFAULT_KOKORO_VOICE = "af_heart"
 
+# Matches emoji + the invisible modifiers (variation selector, zero-width
+# joiner) used to combine them — neither Kokoro nor OpenAI's TTS has any
+# sensible way to speak these, so hearing "asterisk asterisk" or a spelled-
+# out emoji description read aloud is jarring in a voice call in a way it
+# never was for typed chat. Collapsing whitespace after stripping avoids
+# the double-space an emoji mid-sentence would otherwise leave behind.
+_EMOJI_PATTERN = (
+    r"[\U0001F1E6-\U0001F1FF\U0001F300-\U0001FAFF"
+    r"☀-➿⬀-⯿️‍]+"
+)
+
+# Strips Markdown (**bold**, headers, code spans, …) and emoji before
+# synthesis, plus normalizes numbers/currency/units/acronyms/dates so
+# they're read out naturally instead of literally — pipecat's own
+# TTS-preprocessing bundle, shared by both the local and OpenAI-compatible
+# backends below rather than reimplemented per-backend.
+_VOICE_FORMATTER = VoiceFormatter(
+    custom_replacements=[
+        (_EMOJI_PATTERN, " "),
+        (r"[ \t]{2,}", " "),
+    ],
+)
+
 
 def _build_tts(cfg: TTSConfig):
     if cfg.backend == "openai":
@@ -136,8 +160,29 @@ def _build_tts(cfg: TTSConfig):
             settings=OpenAITTSService.Settings(model=cfg.model, voice=cfg.voice)
             if (cfg.model or cfg.voice)
             else None,
+            text_transforms=[("*", _VOICE_FORMATTER)],
         )
-    return KokoroTTSService(settings=KokoroTTSService.Settings(voice=cfg.voice or DEFAULT_KOKORO_VOICE))
+    return KokoroTTSService(
+        settings=KokoroTTSService.Settings(voice=cfg.voice or DEFAULT_KOKORO_VOICE),
+        text_transforms=[("*", _VOICE_FORMATTER)],
+    )
+
+
+# The _VOICE_FORMATTER text filter above is a deterministic safety net —
+# it strips whatever markdown/emoji the model writes regardless of
+# instructions. This prompt is the other half: asking the model to not
+# write that way in the first place, since stripped-after-the-fact
+# markdown *structure* (headers, bullet lists) still reads awkwardly even
+# once the symbols are gone. Only used when the caller doesn't supply
+# their own system_prompt.
+DEFAULT_CALL_SYSTEM_PROMPT = (
+    "You are having a live spoken phone conversation, not writing a chat "
+    "message. Reply the way a person would speak out loud: plain "
+    "conversational sentences only. Never use Markdown formatting "
+    "(no **bold**, *italics*, headers, bullet/numbered lists, or code "
+    "blocks) and never use emoji — none of it can be spoken. Keep replies "
+    "short and natural, like one side of a real conversation."
+)
 
 
 def build_call_bot(
@@ -195,7 +240,8 @@ def build_call_bot(
             stt_cfg.backend, tts_cfg.backend, endpoint.model,
         )
 
-        messages = [{"role": "system", "content": system_prompt}] if system_prompt else []
+        effective_system_prompt = system_prompt or DEFAULT_CALL_SYSTEM_PROMPT
+        messages = [{"role": "system", "content": effective_system_prompt}]
         context = LLMContext(messages)
         user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
             context,
