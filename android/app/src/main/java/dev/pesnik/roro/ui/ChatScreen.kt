@@ -8,6 +8,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -44,7 +46,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -55,6 +60,8 @@ import dev.pesnik.roro.voice.SpeechToText
 @Composable
 fun ChatScreen(onOpenSettings: () -> Unit, viewModel: ChatViewModel = viewModel()) {
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     var input by remember { mutableStateOf("") }
     var isListening by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
@@ -90,6 +97,11 @@ fun ChatScreen(onOpenSettings: () -> Unit, viewModel: ChatViewModel = viewModel(
     }
 
     Scaffold(
+        // enableEdgeToEdge() means the window never actually "resizes" for
+        // the IME the way windowSoftInputMode=adjustResize would on a
+        // non-edge-to-edge app — Compose has to consume the inset itself,
+        // or the bottom bar renders off-screen below the keyboard.
+        modifier = Modifier.imePadding(),
         topBar = {
             TopAppBar(
                 title = { Text("RoRo 🐾", style = MaterialTheme.typography.titleLarge) },
@@ -172,7 +184,16 @@ fun ChatScreen(onOpenSettings: () -> Unit, viewModel: ChatViewModel = viewModel(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 12.dp),
+                .padding(horizontal = 12.dp)
+                // Tap anywhere in the message list to dismiss the keyboard —
+                // there's otherwise no way to see the conversation while the
+                // keyboard covers most of the screen.
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = {
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                    })
+                },
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             items(viewModel.messages) { msg ->
