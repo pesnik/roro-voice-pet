@@ -57,6 +57,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-core")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     // Local, per-device key/URL storage (base URL / API key / model).
@@ -73,4 +74,7 @@ dependencies {
     // gated to API 28+ inside PetImageLoader; falls back to a static first
     // frame via Coil's default decoder on API 26/27).
     implementation("io.coil-kt:coil-gif:2.6.0")
+
+    // GFM markdown parser for chat message rendering (see ui/richtext/).
+    implementation("org.jetbrains:markdown:0.7.8")
 }

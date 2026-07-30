@@ -39,6 +39,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.pesnik.roro.ui.richtext.MarkdownBlock
 import dev.pesnik.roro.voice.SpeechToText
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -154,10 +155,14 @@ private fun MessageBubble(role: String, content: String, streaming: Boolean) {
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier.widthIn(max = 280.dp),
         ) {
-            Text(
-                text = content.ifBlank { if (streaming) "…" else "" },
-                modifier = Modifier.padding(12.dp),
-            )
+            if (content.isBlank()) {
+                Text(
+                    text = if (streaming) "…" else "",
+                    modifier = Modifier.padding(12.dp),
+                )
+            } else {
+                MarkdownBlock(content = content, modifier = Modifier.padding(12.dp))
+            }
         }
     }
 }

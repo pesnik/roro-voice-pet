@@ -29,3 +29,15 @@ The live voice pipeline (Call Mode) is built on [Pipecat](https://github.com/pip
 (BSD-2-Clause, © Daily.co), including its local Whisper (STT), Kokoro (TTS), and
 Silero VAD service integrations, and the `@pipecat-ai/client-js` /
 `small-webrtc-transport` client SDK (BSD-2-Clause).
+
+### RikkaHub
+
+The Android app's markdown/message rendering (`android/app/src/main/java/dev/pesnik/roro/ui/richtext/`)
+is adapted from [RikkaHub](https://github.com/rikkahub/rikkahub) (AGPL-3.0, © re-ovo and
+contributors), specifically its markdown-to-Compose AST renderer
+(`ui/components/richtext/Markdown.kt`) and data table layout
+(`ui/components/table/DataTable.kt`), as adapted from commit `16be94e8c9`. Trimmed for
+this app's needs: no HTML-fallback rendering, no citations/tool-call UI, no LaTeX
+math, and no QuickJS/Prism.js-based syntax highlighting (RikkaHub's code-block chrome
+was rebuilt fresh and much smaller instead). See the header comment in each adapted
+file for the specific upstream source.
