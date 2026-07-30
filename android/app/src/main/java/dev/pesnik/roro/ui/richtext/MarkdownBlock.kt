@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
@@ -481,6 +482,12 @@ private fun Paragraph(
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val context = LocalContext.current
+    // ClickableText is a foundation-level primitive — unlike material3's Text,
+    // it does NOT fall back to LocalContentColor for an unspecified TextStyle
+    // color, so it renders a hardcoded dark default regardless of the bubble
+    // it's sitting in. Must resolve the color explicitly or it's unreadable
+    // on any dark-background bubble.
+    val contentColor = LocalContentColor.current
     FlowRow(
         modifier = modifier.then(
             if (node.nextSibling() != null) Modifier.padding(bottom = LocalTextStyle.current.fontSize.toDp()) else Modifier
@@ -497,7 +504,7 @@ private fun Paragraph(
             text = annotatedString,
             softWrap = true,
             overflow = TextOverflow.Visible,
-            style = LocalTextStyle.current,
+            style = LocalTextStyle.current.copy(color = contentColor),
             onClick = { offset ->
                 annotatedString.getStringAnnotations(LINK_TAG, offset, offset).firstOrNull()?.let { link ->
                     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, link.item.toUri())) }
