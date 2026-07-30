@@ -1,0 +1,26 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Simple pet silhouette: round head + two ears, sized within the
+         adaptive-icon safe zone (center 66dp circle). -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M40,34 L48,20 L52,36 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M68,34 L60,20 L56,36 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,32 m-24,0 a24,24 0 1,0 48,0 a24,24 0 1,0 -48,0" />
+    <path
+        android:fillColor="#1B1B1F"
+        android:pathData="M46,58 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <path
+        android:fillColor="#1B1B1F"
+        android:pathData="M62,58 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <path
+        android:fillColor="#1B1B1F"
+        android:pathData="M48,68 q6,6 12,0 q-6,4 -12,0 Z" />
+</vector>
