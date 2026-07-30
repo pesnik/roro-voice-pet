@@ -60,6 +60,11 @@ dependencies {
     implementation("androidx.compose.material:material-icons-core")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
+    // Downloadable Google Fonts (Baloo 2 display / Nunito body) — resolved at
+    // runtime via Google Play Services, so this adds ~0 bytes to the APK
+    // instead of bundling .ttf files.
+    implementation("androidx.compose.ui:ui-text-google-fonts")
+
     // Local, per-device key/URL storage (base URL / API key / model).
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 

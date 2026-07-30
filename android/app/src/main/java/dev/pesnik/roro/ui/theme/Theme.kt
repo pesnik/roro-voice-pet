@@ -1,30 +1,53 @@
 package dev.pesnik.roro.ui.theme
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
 
-private val DarkColors = darkColorScheme(primary = RoroPrimary, secondary = RoroSecondary)
-private val LightColors = lightColorScheme(primary = RoroPrimary, secondary = RoroSecondary)
+// A deliberate warm "cozy pet companion" palette sampled from the calico
+// sprite itself (see Color.kt) — not Material's dynamic-color-from-wallpaper
+// default, which is what made the app look flat and grayed-out before.
+private val DarkColors = darkColorScheme(
+    primary = CalicoOrange,
+    onPrimary = CalicoTextOnOrange,
+    primaryContainer = CalicoOrangeDeep,
+    onPrimaryContainer = CalicoParchment,
+    secondary = CalicoPink,
+    onSecondary = CalicoTextOnOrange,
+    background = CalicoBrownDark,
+    onBackground = CalicoCream,
+    surface = CalicoBrownSurface,
+    onSurface = CalicoCream,
+    surfaceVariant = CalicoBrownContainer,
+    onSurfaceVariant = CalicoParchment,
+    surfaceContainer = CalicoBrownSurface,
+    surfaceContainerHigh = CalicoBrownContainer,
+    surfaceContainerHighest = CalicoOrangeDeep,
+    outline = CalicoBrownOutline,
+    outlineVariant = CalicoBrownContainer,
+    error = CalicoPink,
+)
+
+private val LightColors = lightColorScheme(
+    primary = CalicoOrange,
+    onPrimary = CalicoTextOnOrange,
+    primaryContainer = CalicoParchment,
+    onPrimaryContainer = CalicoTextOnOrange,
+    secondary = CalicoPink,
+    background = CalicoParchment,
+    onBackground = CalicoTextOnOrange,
+    surface = CalicoCream,
+    onSurface = CalicoTextOnOrange,
+    surfaceVariant = CalicoParchment,
+)
 
 @Composable
 fun RoroTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    val context = LocalContext.current
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        darkTheme -> DarkColors
-        else -> LightColors
-    }
+    val colorScheme = if (darkTheme) DarkColors else LightColors
     MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
 }

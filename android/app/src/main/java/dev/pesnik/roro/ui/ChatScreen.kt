@@ -4,7 +4,12 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,20 +17,23 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -35,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -83,46 +92,77 @@ fun ChatScreen(onOpenSettings: () -> Unit, viewModel: ChatViewModel = viewModel(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("RoRo") },
+                title = { Text("RoRo 🐾", style = MaterialTheme.typography.titleLarge) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    titleContentColor = MaterialTheme.colorScheme.primary,
+                ),
                 actions = {
-                    TextButton(onClick = { viewModel.voiceReplyEnabled.value = !viewModel.voiceReplyEnabled.value }) {
-                        Text(if (viewModel.voiceReplyEnabled.value) "🔊" else "🔇")
-                    }
-                    TextButton(onClick = onOpenSettings) { Text("⚙️") }
+                    RoundIconButton(
+                        emoji = if (viewModel.voiceReplyEnabled.value) "🔊" else "🔇",
+                        onClick = { viewModel.voiceReplyEnabled.value = !viewModel.voiceReplyEnabled.value },
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    RoundIconButton(emoji = "⚙️", onClick = onOpenSettings)
+                    Spacer(Modifier.width(4.dp))
                 },
             )
         },
+        containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            Column(Modifier.padding(8.dp)) {
+            Column(Modifier.padding(12.dp)) {
                 viewModel.errorText.value?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(bottom = 4.dp))
+                    Text(
+                        it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 6.dp),
+                    )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = input,
-                        onValueChange = { input = it },
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(24.dp),
                         modifier = Modifier.weight(1f),
-                        placeholder = { Text("Message RoRo…") },
+                    ) {
+                        TextField(
+                            value = input,
+                            onValueChange = { input = it },
+                            placeholder = { Text("Message RoRo…", style = MaterialTheme.typography.bodyLarge) },
+                            textStyle = MaterialTheme.typography.bodyLarge,
+                            colors = TextFieldDefaults.colors(
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    RoundIconButton(
+                        emoji = "🎙️",
+                        highlighted = isListening,
+                        onClick = {
+                            if (!micPermissionGranted) {
+                                requestPermission.launch(Manifest.permission.RECORD_AUDIO)
+                            } else {
+                                isListening = true
+                                speechToText.start()
+                            }
+                        },
                     )
                     Spacer(Modifier.width(8.dp))
-                    TextButton(onClick = {
-                        if (!micPermissionGranted) {
-                            requestPermission.launch(Manifest.permission.RECORD_AUDIO)
-                        } else {
-                            isListening = true
-                            speechToText.start()
-                        }
-                    }) {
-                        Text(if (isListening) "🎙️…" else "🎙️")
-                    }
-                    TextButton(
+                    RoundIconButton(
+                        emoji = "➤",
+                        filled = true,
+                        enabled = input.isNotBlank() && !viewModel.isSending.value,
                         onClick = {
                             val text = input
                             input = ""
                             viewModel.sendMessage(text)
                         },
-                        enabled = input.isNotBlank() && !viewModel.isSending.value,
-                    ) { Text("➤") }
+                    )
                 }
             }
         },
@@ -133,7 +173,7 @@ fun ChatScreen(onOpenSettings: () -> Unit, viewModel: ChatViewModel = viewModel(
                 .fillMaxSize()
                 .padding(padding)
                 .padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             items(viewModel.messages) { msg ->
                 MessageBubble(role = msg.role, content = msg.content, streaming = msg.isStreaming)
@@ -143,25 +183,74 @@ fun ChatScreen(onOpenSettings: () -> Unit, viewModel: ChatViewModel = viewModel(
     }
 }
 
+/** Small circular emoji button used for the top-bar actions, mic, and send —
+ * gives the flat emoji-as-TextButton look some actual shape/weight instead. */
+@Composable
+private fun RoundIconButton(
+    emoji: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    filled: Boolean = false,
+    highlighted: Boolean = false,
+    enabled: Boolean = true,
+) {
+    val background = when {
+        filled && enabled -> MaterialTheme.colorScheme.primary
+        highlighted -> MaterialTheme.colorScheme.secondary
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    Surface(
+        shape = CircleShape,
+        color = background.copy(alpha = if (enabled) 1f else 0.4f),
+        modifier = modifier.size(44.dp),
+        onClick = onClick,
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+            Text(emoji, style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+}
+
 @Composable
 private fun MessageBubble(role: String, content: String, streaming: Boolean) {
     val isUser = role == "user"
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
     ) {
-        Surface(
-            color = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.widthIn(max = 280.dp),
+        AnimatedVisibility(
+            visible = visible,
+            enter = fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 3 },
         ) {
-            if (content.isBlank()) {
-                Text(
-                    text = if (streaming) "…" else "",
-                    modifier = Modifier.padding(12.dp),
-                )
+            // A small tail-corner (instead of a fully symmetric pill) is the
+            // detail that keeps this from reading as a generic chat bubble.
+            val shape = if (isUser) {
+                RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp)
             } else {
-                MarkdownBlock(content = content, modifier = Modifier.padding(12.dp))
+                RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 4.dp, bottomEnd = 18.dp)
+            }
+            Surface(
+                color = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
+                contentColor = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                shape = shape,
+                modifier = Modifier.widthIn(max = 280.dp),
+            ) {
+                if (content.isBlank()) {
+                    Text(
+                        text = if (streaming) "…" else "",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(14.dp),
+                    )
+                } else {
+                    MarkdownBlock(
+                        content = content,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(14.dp),
+                    )
+                }
             }
         }
     }
